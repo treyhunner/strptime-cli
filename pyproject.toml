@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "strptime"
+name = "strptime-cli"
 dynamic = ["version"]
 description = ''
 readme = "README.md"
@@ -32,9 +32,9 @@ dependencies = [
 ]
 
 [project.urls]
-Documentation = "https://github.com/treyhunner/strptime#readme"
-Issues = "https://github.com/treyhunner/strptime/issues"
-Source = "https://github.com/treyhunner/strptime"
+Documentation = "https://github.com/treyhunner/strptime-cli#readme"
+Issues = "https://github.com/treyhunner/strptime-cli/issues"
+Source = "https://github.com/treyhunner/strptime-cli"
 
 [project.scripts]
 strptime = "strptime:main"

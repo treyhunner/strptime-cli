@@ -1,12 +1,12 @@
 # strptime
 
-[![PyPI - Version](https://img.shields.io/pypi/v/strptime.svg)](https://pypi.org/project/strptime)
-[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/strptime.svg)](https://pypi.org/project/strptime)
+[![PyPI - Version](https://img.shields.io/pypi/v/strptime-cli.svg)](https://pypi.org/project/strptime-cli)
+[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/strptime-cli.svg)](https://pypi.org/project/strptime-cli)
 
 ## Installation
 
 ```console
-pipx install strptime
+pipx install strptime-cli
 ```
 
 ## Usage
