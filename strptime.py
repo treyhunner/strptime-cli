@@ -9,6 +9,10 @@ import sys
 
 __version__ = "0.1.0"
 
+NO_FORMAT="\033[0m"
+F_BOLD="\033[1m"
+C_YELLOW="\033[38;5;227m"
+
 formats = {
     "RFC 2822": "%a, %d %b %Y %H:%M:%S",
     "Timestamp": "%Y-%m-%d %H:%M:%S",
@@ -61,13 +65,16 @@ more_formats = [
     "%d/%m/%Y",
 ]
 
+def sample_code(text, date_format):
+    print(f"{F_BOLD}Sample Code:{NO_FORMAT}")
+    return f"""from datetime import datetime
+example = "{text}"
+parsed = datetime.strptime(example, "{date_format}")
+formatted_again = f"{{parsed:{date_format}}}" """
 
-def main():
-    text = " ".join(sys.argv[1:])
-    if not text:
-        sys.exit(__doc__.strip())
-
+def detect_format(text):
     all_formats = [*formats.values(), *more_formats]
+    date_format = ""
     for date_format in all_formats:
         try:
             datetime.strptime(text, date_format)
@@ -75,11 +82,23 @@ def main():
             continue
         else:
             break
-    else:
-        sys.exit("No valid format found.")
 
+    return date_format
+
+def launch_tui():
+    print(f"{F_BOLD}Paste an example date/time string to see the guessed format or paste a format string to see a formatted example.{NO_FORMAT}")
+    text = input(f"{F_BOLD}{C_YELLOW}> {NO_FORMAT}")
+
+    date_format = detect_format(text)
     print(date_format)
+    print(sample_code(text, date_format))
 
+def main():
+    text = " ".join(sys.argv[1:])
+    if not text:
+        launch_tui()
+    date_format = detect_format(text)
+    print(date_format)
 
 if __name__ == "__main__":
     main()
