@@ -16,8 +16,11 @@ PARTS_RE = re.compile(r"([^A-Za-z0-9]+)")
 specific_custom_formats = [
     "%m/%d/%Y %I:%M %p",
     "%m/%d/%Y",
+    "%m/%d/%y",
     "%m-%d-%Y",
-    "%Y-%m-%d %H:%M:%S.%f"
+    "%Y-%m-%d %H:%M:%S.%f",
+    "%Y-%m-%dT%H:%M:%S%z",
+    "%Y-%m-%d %H:%M:%S%z",
 ]
 
 generic_formats = {
