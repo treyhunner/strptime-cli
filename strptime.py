@@ -11,16 +11,21 @@ import sys
 __version__ = "0.2.0"
 
 
-PARTS_RE = re.compile(r"([^A-Za-z0-9]+)")
+PARTS_RE = re.compile(r"""
+    (
+        # %S%z matching
+        [0-9+]*
+        [+] \d{2} :? \d{2}
+    |
+        [A-Za-z0-9]+
+    )
+""", flags=re.VERBOSE)
 
 specific_custom_formats = [
     "%m/%d/%Y %I:%M %p",
     "%m/%d/%Y",
     "%m/%d/%y",
     "%m-%d-%Y",
-    "%Y-%m-%d %H:%M:%S.%f",
-    "%Y-%m-%dT%H:%M:%S%z",
-    "%Y-%m-%d %H:%M:%S%z",
 ]
 
 generic_formats = {
@@ -117,9 +122,9 @@ def make_new_format(format_parts, date_string_parts):
     date_format = ""
     for string_part in date_string_parts:
         if PARTS_RE.fullmatch(string_part):
-            date_format += string_part
-        else:
             date_format += next(format_parts)
+        else:
+            date_format += string_part
     return date_format
 
 
@@ -135,8 +140,8 @@ def main():
         else:
             break
     else:
-        all_parts = PARTS_RE.split(text)
-        significant_parts = len([p for p in all_parts if not PARTS_RE.fullmatch(p)])
+        all_parts = [p for p in PARTS_RE.split(text) if p]
+        significant_parts = len([p for p in all_parts if PARTS_RE.fullmatch(p)])
         for format_parts in generic_formats.get(significant_parts, []):
             date_format = make_new_format(format_parts, all_parts)
             try:
