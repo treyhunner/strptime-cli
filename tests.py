@@ -15,11 +15,19 @@ def test_main_with_valid_format(mock_argv, capsys):
     captured = capsys.readouterr()
     assert captured.out.strip() == "%Y-%m-%d %H:%M"
 
-def test_main_with_no_args(mock_argv):
-    mock_argv([])
+def test_main_with_help(mock_argv):
+    mock_argv(["--help"])
     with pytest.raises(SystemExit) as excinfo:
         main()
     assert "Usage:" in str(excinfo.value)
+
+def test_main_with_no_args(mock_argv, capsys, monkeypatch):
+    mock_argv([])
+    monkeypatch.setattr('builtins.input', lambda _: "2030-01-24 05:45")
+    main()
+    captured = capsys.readouterr()
+    assert "Paste an example date/time string to see the guessed format." in captured.out
+    assert "%Y-%m-%d %H:%M" in captured.out
 
 def test_main_with_invalid_format(mock_argv):
     mock_argv(["invalid-date-format"])
