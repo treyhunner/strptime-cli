@@ -6,6 +6,7 @@ $ python -m strptime "2030-01-24 05:45"
 from datetime import datetime
 import re
 import sys
+from warnings import filterwarnings
 
 
 __version__ = "0.2.0"
@@ -130,28 +131,31 @@ def make_new_format(format_parts, date_string_parts):
     return date_format
 
 
-def detect_format(text):
-    for date_format in specific_custom_formats:
-        try:
-            datetime.strptime(text, date_format)
-        except ValueError:
-            continue
-        else:
-            break
+def can_parse(date_format, text):
+    try:
+        datetime.strptime(text, date_format)
+    except ValueError:
+        return False
     else:
-        all_parts = [p for p in PARTS_RE.split(text) if p]
-        significant_parts = len([p for p in all_parts if PARTS_RE.fullmatch(p)])
-        for format_parts in generic_formats.get(significant_parts, []):
-            date_format = make_new_format(format_parts, all_parts)
-            try:
-                datetime.strptime(text, date_format)
-            except ValueError:
-                continue
-            else:
-                break
-        else:
-            raise ValueError("No valid format found.")
-    return date_format
+        return True
+
+
+def detect_format(text):
+    filterwarnings(
+        "ignore",
+        category=DeprecationWarning,
+        message=r"[\s\S]*https://github.com/python/cpython/issues/70647[\s\S]*",
+    )
+    for date_format in specific_custom_formats:
+        if can_parse(date_format, text):
+            return date_format
+    all_parts = [p for p in PARTS_RE.split(text) if p]
+    significant_parts = len([p for p in all_parts if PARTS_RE.fullmatch(p)])
+    for format_parts in generic_formats.get(significant_parts, []):
+        date_format = make_new_format(format_parts, all_parts)
+        if can_parse(date_format, text):
+            return date_format
+    raise ValueError("No valid format found.")
 
 
 def prompt_for_date():
