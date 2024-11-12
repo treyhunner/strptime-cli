@@ -10,6 +10,8 @@ import sys
 
 __version__ = "0.2.0"
 
+NO_FORMAT="\033[0m"
+F_BOLD="\033[1m"
 
 PARTS_RE = re.compile(r"""
     (
@@ -128,10 +130,7 @@ def make_new_format(format_parts, date_string_parts):
     return date_format
 
 
-def main():
-    text = " ".join(sys.argv[1:])
-    if not text:
-        sys.exit(__doc__.strip())
+def detect_format(text):
     for date_format in specific_custom_formats:
         try:
             datetime.strptime(text, date_format)
@@ -151,8 +150,25 @@ def main():
             else:
                 break
         else:
-            sys.exit("No valid format found.")
-    print(date_format)
+            raise ValueError("No valid format found.")
+    return date_format
+
+
+def prompt_for_date():
+    print(f"{F_BOLD}Paste an example date/time string to see the guessed format.{NO_FORMAT}")
+    return input(f"{F_BOLD}> {NO_FORMAT}")
+
+
+def main():
+    if "--help" in sys.argv:
+        sys.exit(__doc__.strip())
+    text = " ".join(sys.argv[1:])
+    if not text:
+        text = prompt_for_date()
+    try:
+        print(detect_format(text))
+    except ValueError as e:
+        sys.exit(str(e))
 
 
 if __name__ == "__main__":
