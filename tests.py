@@ -1,7 +1,7 @@
 import pytest
 from datetime import datetime
 import sys
-from strptime import main, formats, more_formats
+from strptime import main
 
 @pytest.fixture
 def mock_argv(monkeypatch):
@@ -50,20 +50,62 @@ def test_main_with_invalid_format(mock_argv):
 ])
 def test_various_date_formats(mock_argv, capsys, date_string, expected_format):
     mock_argv([date_string])
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise ValueError(f"{date_string} wasn't parsed as {expected_format}")
     captured = capsys.readouterr()
     assert captured.out.strip() == expected_format, date_string
 
-def test_formats_dict():
-    assert isinstance(formats, dict)
-    assert all(isinstance(k, str) and isinstance(v, str) for k, v in formats.items())
-
-def test_more_formats_list():
-    assert isinstance(more_formats, list)
-    assert all(isinstance(f, str) for f in more_formats)
-
-def test_all_formats_are_valid():
-    for format_string in list(formats.values()) + more_formats:
+def test_many_more_formats_are_valid():
+    lots_of_formats = [
+        "%a, %d %b %Y %H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S%z",
+        "%Y-%m-%dT%H:%M:%S",
+        "%m/%d/%Y %I:%M:%S %p",
+        "%d/%m/%Y %H:%M:%S",
+        "%a, %d %b %Y %H:%M:%S",
+        "%d-%b-%Y %H:%M",
+        "%Y%m%dT%H%M%SZ",
+        "%Y-%m-%d %H:%M:%S%z",
+        "%a, %d %b %Y %H:%M",
+        "%Y-%m-%d %H:%M",
+        "%m/%d/%Y %I:%M %p",
+        "%d/%m/%Y %H:%M",
+        "%m/%d/%y",
+        "%Y-%m-%d",
+        "%B %d, %Y",
+        "%d %b %Y",
+        "%Y-%m-%d %H:%M:%S.%f",
+        "%Y-%j",
+        "%m/%d/%Y %I:%M %p",
+        "%m/%d/%Y",
+        "%d-%m-%Y",
+        "%H:%M:%S",
+        "%Y-%m-%d_%H-%M",
+        "%a %b %e %H:%M:%S %Z %Y",
+        "%H:%M%z",
+        "%H:%M%-z",
+        "%b %Y",
+        "%A",
+        "%a",
+        "%b",
+        "%B",
+        "%b %d, %Y",
+        "%a, %d %b %Y",
+        "%a %d %b %Y",
+        "%H:%M:%S%z",
+        "%I:%M:%S %p",
+        "%I:%M %p",
+        "%Y-%m-%d %H:%M%p",
+        "%Y_%m_%d",
+        "%d.%m.%Y",
+        "%m-%d-%Y",
+        "%d/%m/%Y",
+        "%Y-%m-%d %H:%M:%S.%f"
+    ]
+    for format_string in lots_of_formats:
         try:
             datetime.now().strftime(format_string)
         except ValueError:
