@@ -9,7 +9,7 @@ import sys
 from warnings import filterwarnings
 
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 NO_FORMAT="\033[0m"
 F_BOLD="\033[1m"
