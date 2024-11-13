@@ -17,8 +17,8 @@ F_BOLD="\033[1m"
 PARTS_RE = re.compile(r"""
     (
         # %S%z matching
-        [0-9+]*
-        [+] \d{2} :? \d{2}
+        [0-9]*
+        [+-] \d{2} :? \d{2}
     |
         [A-Za-z0-9]+
     )
