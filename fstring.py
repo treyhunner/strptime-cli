@@ -289,7 +289,10 @@ def parse_number_to_spec(s, prefix='', suffix='', align='', fill='', width=0):
             value_type='float',
             test_value=abs(float(value))
         )
-        results.append(spec)
+        if not decimals and has_comma:
+            results.insert(0, spec)
+        else:
+            results.append(spec)
         return results
 
     return []
