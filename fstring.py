@@ -2,436 +2,351 @@
 """
 f-string format specification finder - reverse engineer format specs from output examples
 """
-
+from dataclasses import dataclass, field
 import re
 import sys
-from typing import List, Tuple, Optional, Dict
+from typing import Optional
 
 
-def split_numeric_literals(s: str) -> Tuple[str, str, str]:
-    """
-    Split a string into prefix literals, numeric part, and suffix literals.
+HEX_RE = re.compile(r'0[xX][0-9a-fA-F]+')
+UNPREFIXED_HEX_RE = re.compile(r'[0-9]*[a-fA-F]+[0-9]*')
+PERCENT_RE = re.compile(r'[+-]?\d+\.?\d*%')
+ZERO_PADDED_RE = re.compile(r'0+\d+\.?\d*')
+THOUSANDS_RE = re.compile(r'[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?')
+NUMBER_RE = re.compile(r'[+-]?\d+\.?\d*')
 
-    The numeric part is what could be produced by a Python format specification:
-    - Digits (0-9)
-    - Decimal point (.)
-    - Comma thousands separator (,)
-    - Minus sign (-) at the start
-    - Plus sign (+) at the start
-    - Percentage sign (%) at the end
-    - Hex notation (0x/0X prefix with hex digits)
-    - Scientific notation (e/E with exponent)
-
-    Everything else is treated as literal text.
-    """
-    # Special case: hex format
-    hex_match = re.match(r'^(.*?)(0[xX][0-9a-fA-F]+)(.*)$', s)
-    if hex_match:
-        prefix, num, suffix = hex_match.groups()
-        # Check if prefix looks like padding (all same char)
-        if prefix and all(c == prefix[0] for c in prefix):
-            return '', s, ''
-        return prefix, num, suffix
-
-    # Special case: percentage (number with % at end)
-    percent_match = re.match(r'^(.*?)([+-]?\d+\.?\d*%)(.*)$', s)
-    if percent_match:
-        prefix, num, suffix = percent_match.groups()
-        # Check if prefix looks like padding
-        if prefix and all(c == prefix[0] for c in prefix):
-            return '', s, ''
-        return prefix, num, suffix
-
-    # Scientific notation
-    sci_match = re.match(r'^(.*?)([+-]?\d+\.?\d*[eE][+-]?\d+)(.*)$', s)
-    if sci_match:
-        prefix, num, suffix = sci_match.groups()
-        if prefix and all(c == prefix[0] for c in prefix):
-            return '', s, ''
-        return prefix, num, suffix
-
-    # Regular number (possibly with commas, decimal point)
-    # This regex finds the longest numeric sequence that could be from format()
-    patterns = [
-        # With thousands separator
-        r'^(.*?)([+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?)(.*)$',
-        # Decimal number
-        r'^(.*?)([+-]?\d+\.\d+)(.*)$',
-        # Integer (possibly with leading zeros)
-        r'^(.*?)([+-]?\d+)(.*)$',
-    ]
-
-    for pattern in patterns:
-        match = re.match(pattern, s)
-        if match:
-            prefix, num, suffix = match.groups()
-
-            # Check if what we found as prefix/suffix is actually padding
-            # Padding is: repeated same character AND (spaces or common fill chars)
-            is_padding_char = lambda text, char: (
-                text and
-                all(c == char for c in text) and
-                char in ' _*#=.-'
-            )
-
-            # If both prefix and suffix exist and are the same character, it's likely padding
-            if prefix and suffix and prefix[0] == suffix[0] and is_padding_char(prefix, prefix[0]):
-                return '', s, ''
-
-            # If just prefix exists and looks like padding
-            if prefix and is_padding_char(prefix, prefix[0]) and not suffix:
-                return '', s, ''
-
-            # If just suffix exists and looks like padding
-            if suffix and is_padding_char(suffix, suffix[0]) and not prefix:
-                return '', s, ''
-
-            # Otherwise treat as literals
-            return prefix, num, suffix
-
-    # No numeric part found
-    return '', s, ''
+FULL_HEX_RE = re.compile(rf'(.*?)({HEX_RE.pattern})(.*)')
+FULL_UNPREFIXED_HEX_RE = re.compile(rf'()({UNPREFIXED_HEX_RE.pattern})()')
+FULL_PERCENT_RE = re.compile(rf'(.*?)({PERCENT_RE.pattern})(.*)')
+FULL_THOUSANDS_RE = re.compile(rf'(.*?)({THOUSANDS_RE.pattern})(.*)')
+FULL_NUMBER_RE = re.compile(rf'(.*?)({NUMBER_RE.pattern})(.*)')
+PAD_CHARS = ' _*'
 
 
-def detect_padding(s: str, pad_chars: str = ' _*#=.-') -> Tuple[str, str, str, str]:
-    """
-    Detect consistent padding in a string.
-    Only considers padding if it's a repeated character.
-    """
-    # First check if we have literals (not padding)
-    prefix, num, suffix = split_numeric_literals(s)
-    if prefix or suffix:
-        # We have actual literals, not padding
-        return s, '', '', ' '
+@dataclass
+class NumberParts:
+    prefix: str
+    num: str
+    suffix: str
 
-    # Now check for padding patterns
-    for char in pad_chars:
-        left = len(s) - len(s.lstrip(char))
-        right = len(s) - len(s.rstrip(char))
-
-        if left or right:
-            core = s[left:len(s)-right] if right else s[left:]
-            if core:  # Must have non-padding content
-                return core, s[:left], s[len(s)-right:] if right else '', char
-
-    return s, '', '', ' '
+    def __iter__(self):
+        return iter((self.prefix, self.num, self.suffix))
 
 
-def parse_number(s: str) -> Optional[Dict]:
-    """Parse a string as a number and return its properties."""
-    # Hex format
-    if re.match(r'^0[xX][0-9a-fA-F]+$', s):
-        return {
-            'type': 'hex',
-            'value': int(s[2:], 16),
-            'padded': len(s) > 3 and s[2] == '0',
-            'width': len(s)
-        }
+@dataclass
+class FormatSpec:
+    """Represents the components needed to build a format specification."""
+    align: str = ''
+    fill: str = ''
+    width: int = 0
+    comma: bool = False
+    decimals: Optional[int] = None
+    type_char: str = ''
+    sign: str = ''
+    prefix: str = ''
+    suffix: str = ''
 
-    # Percentage
-    if s.endswith('%'):
-        num = s[:-1].strip()
-        if re.match(r'^[+-]?\d+\.?\d*$', num):
-            return {
-                'type': 'percent',
-                'value': float(num) / 100,
-                'decimals': len(num.split('.')[1]) if '.' in num else 0,
-                'has_sign': num.startswith('+') or num.startswith('-')
-            }
+    # Metadata for generating variations
+    value_type: str = 'str'  # 'int', 'float', or 'str'
+    test_value: float = 0
 
-    # Scientific notation
-    if re.match(r'^[+-]?\d+\.?\d*[eE][+-]?\d+$', s):
-        return {
-            'type': 'scientific',
-            'value': float(s),
-            'has_sign': s.startswith('+') or s.startswith('-')
-        }
+    def build(self):
+        """Build the format specification string."""
+        return build_format_spec(
+            align=self.align,
+            fill=self.fill,
+            width=self.width,
+            comma=self.comma,
+            decimals=self.decimals,
+            type_char=self.type_char,
+            sign=self.sign,
+            prefix=self.prefix,
+            suffix=self.suffix
+        )
 
-    # Zero-padded number (only if no sign and starts with 0)
-    # But not if it has commas
-    if re.match(r'^0+\d', s) and not s.startswith('0.') and ',' not in s:
-        return {
-            'type': 'zero_pad',
-            'value': float(s) if '.' in s else int(s),
-            'width': len(s),
-            'decimals': len(s.split('.')[1]) if '.' in s else 0
-        }
-
-    # Regular number
-    clean = s.replace(',', '')
-    if re.match(r'^[+-]?\d+\.?\d*$', clean):
-        return {
-            'type': 'number',
-            'value': float(clean) if '.' in clean else int(clean),
-            'has_comma': ',' in s,
-            'decimals': len(clean.split('.')[1]) if '.' in clean else 0,
-            'is_float': '.' in clean,
-            'has_sign': s.startswith('+'),
-            'is_negative': s.startswith('-')
-        }
-
-    return None
+    def as_tuple(self):
+        """Return (value_type, format_spec) tuple for compatibility."""
+        return (self.value_type, self.build())
 
 
-def build_format_spec(align: str = '', fill: str = '', width: int = 0,
-                      comma: bool = False, decimals: Optional[int] = None,
-                      type_char: str = '', sign: str = '',
-                      prefix: str = '', suffix: str = '') -> str:
+def build_format_spec(
+        align='',
+        fill='',
+        width=0,
+        comma=False,
+        decimals=None,
+        type_char='',
+        sign='',
+        prefix='',
+        suffix='',
+):
     """Build a format specification string."""
-    parts = []
+    fill = fill if fill != ' ' else ''
+    width_str = str(width) if width else ''
+    comma_str = ',' if comma else ''
+    decimals_str = f'.{decimals}' if decimals is not None else ''
 
-    # Fill and alignment
-    if fill and fill != ' ':
-        parts.append(fill)
+    # Special case: integer with comma but no width should omit 'd'
+    if type_char == 'd' and comma and not width:
+        type_char = ''
+
     if align:
-        parts.append(align)
+        spec = f'{fill}{align}{sign}{width_str}{comma_str}{decimals_str}{type_char}'
+    else:
+        spec = f'{sign}{fill}{width_str}{comma_str}{decimals_str}{type_char}'
 
-    # Sign
-    if sign:
-        parts.append(sign)
-
-    # Width
-    if width:
-        parts.append(str(width))
-
-    # Comma separator
-    if comma:
-        parts.append(',')
-
-    # Precision
-    if decimals is not None:
-        parts.append(f'.{decimals}')
-
-    # Type - only add 'd' if we don't have comma or other modifiers
-    if type_char:
-        # Don't add 'd' if we have comma without width
-        if not (type_char == 'd' and comma and not width):
-            parts.append(type_char)
-
-    spec = ''.join(parts)
-
-    # Build the final f-string with literals
     if spec:
         return f'f"{prefix}{{variable:{spec}}}{suffix}"'
     else:
         return f'f"{prefix}{{variable}}{suffix}"'
 
 
-def analyze_number_format(s: str) -> List[Tuple[str, str]]:
-    """Analyze a string and return possible format specifications."""
-    if not s:
-        return [('str', 'f"{variable}"')]
+def is_padding(text):
+    """Check if text represents padding characters."""
+    return len(set(text)) == 1 and text[0] in PAD_CHARS
 
-    results = []
+
+def count_decimals(number_string):
+    """Return number of decimals in given numeric string."""
+    return len(number_string.split('.')[1]) if '.' in number_string else 0
+
+
+def split_numeric_literals(s):
+    """Split a string into prefix literals, numeric part, and suffix literals."""
+    # Check for hex with 0x prefix first
+    if match := FULL_HEX_RE.fullmatch(s):
+        return NumberParts(*match.groups())
+
+    # Check for percentage
+    if match := FULL_PERCENT_RE.fullmatch(s):
+        return NumberParts(*match.groups())
+
+    # Check for unprefixed hex (must contain a-f or A-F)
+    if match := FULL_UNPREFIXED_HEX_RE.fullmatch(s):
+        prefix, num, suffix = match.groups()
+        # Check if prefix/suffix look like padding
+        left_pad = is_padding(prefix)
+        right_pad = is_padding(suffix)
+        # If padding on both sides or neither side, treat whole thing as hex
+        if not ((left_pad and not right_pad) or (right_pad and not left_pad)):
+            return NumberParts(prefix, num, suffix)
+
+    # Check for regular numbers with thousands separators or regular numbers
+    for regex in [FULL_THOUSANDS_RE, FULL_NUMBER_RE]:
+        if match := regex.fullmatch(s):
+            prefix, num, suffix = match.groups()
+            left_pad = is_padding(prefix)
+            right_pad = is_padding(suffix)
+            if (
+                    (left_pad or right_pad)
+                    and (left_pad != right_pad or prefix[0] == suffix[0])
+            ):
+                return NumberParts('', s, '')
+
+            return NumberParts(prefix, num, suffix)
+
+    return NumberParts('', s, '')
+
+
+def detect_padding(s, pad_chars=PAD_CHARS):
+    """Detect consistent padding in a string."""
+    for char in pad_chars:
+        left = len(s) - len(s.lstrip(char))
+        right = len(s.rstrip(char))
+        left_pad, core, right_pad = s[:left], s[left:right], s[right:]
+        if (left_pad or right_pad) and core:
+            return core, left_pad, right_pad, char
+
+    return s, '', '', ' '
+
+
+def parse_number_to_spec(s, prefix='', suffix='', align='', fill='', width=0):
+    """Parse a string as a number and return FormatSpec objects."""
+
+    # Hex format with 0x prefix
+    if HEX_RE.fullmatch(s):
+        value = int(s.removeprefix('0x'), 16)
+        is_padded = s.startswith('0x0')
+        return [FormatSpec(
+            fill="0" if is_padded else "",
+            width=len(s) if is_padded else 0,
+            type_char='x',
+            sign='#',
+            prefix=prefix,
+            suffix=suffix,
+            value_type='int',
+            test_value=value
+        )]
+
+    # Unprefixed hex format (contains a-f or A-F)
+    if UNPREFIXED_HEX_RE.fullmatch(s):
+        value = int(s, 16)
+
+        # Choose format based on what's present (uppercase takes precedence if both)
+        hex_char = 'X' if s.isupper() else 'x'
+
+        # Check for zero padding
+        is_padded = len(s) > 1 and s[0] == '0'
+
+        return [FormatSpec(
+            fill="0" if is_padded else "",
+            width=len(s) if is_padded else 0,
+            type_char=hex_char,
+            prefix=prefix,
+            suffix=suffix,
+            value_type='int',
+            test_value=value
+        )]
+
+    # Percentage
+    if PERCENT_RE.fullmatch(s):
+        num = s.removesuffix('%')
+        value = float(num) / 100
+        decimals = count_decimals(num)
+        has_sign = num.startswith('+')  # Only + triggers sign format, not -
+        return [FormatSpec(
+            sign='+' if has_sign else '',
+            decimals=decimals,
+            type_char='%',
+            prefix=prefix,
+            suffix=suffix,
+            value_type='float',
+            test_value=value
+        )]
+
+    if ZERO_PADDED_RE.fullmatch(s.removeprefix('+')):
+        # Zero-padded number (possibly with sign)
+        width_val = len(s)  # Include the sign in the width
+        decimals = count_decimals(s)
+        has_sign = s.startswith('+')
+        value = float(s) if decimals else int(s)
+
+        results = []
+        if not decimals:
+            spec = FormatSpec(
+                fill="0",
+                width=width_val,
+                type_char='d',
+                sign='+' if has_sign else '',
+                prefix=prefix,
+                suffix=suffix,
+                value_type='int',
+                test_value=abs(value)
+            )
+            results.append(spec)
+
+        spec = FormatSpec(
+            fill="0",
+            width=width_val,
+            decimals=decimals,
+            type_char='f',
+            sign='+' if has_sign else '',
+            prefix=prefix,
+            suffix=suffix,
+            value_type='float',
+            test_value=abs(float(value))
+        )
+        results.append(spec)
+        return results
+
+    # Regular number
+    clean = s.replace(',', '')
+    if NUMBER_RE.fullmatch(clean):
+        has_comma = THOUSANDS_RE.fullmatch(s)
+        decimals = count_decimals(clean)
+        has_sign = s.startswith('+')
+        sign = '+' if has_sign else ''
+        value = float(clean) if decimals else int(clean)
+
+        results = []
+        if not decimals and (align or has_comma or sign or fill.strip()):
+            # Integer format
+            spec = FormatSpec(
+                align=align,
+                fill=fill,
+                width=width,
+                comma=has_comma,
+                type_char='d',
+                sign=sign,
+                prefix=prefix,
+                suffix=suffix,
+                value_type='int',
+                test_value=abs(int(value))
+            )
+            results.append(spec)
+
+        # Float format
+        spec = FormatSpec(
+            align=align,
+            fill=fill,
+            width=width,
+            comma=has_comma,
+            decimals=decimals,
+            type_char='f',
+            sign=sign,
+            prefix=prefix,
+            suffix=suffix,
+            value_type='float',
+            test_value=abs(float(value))
+        )
+        results.append(spec)
+        return results
+
+    return []
+
+
+def analyze_number_format(s):
+    """Analyze a string and return possible format specifications."""
 
     # First, split into literals and numeric part
     prefix, number_part, suffix = split_numeric_literals(s)
 
-    # If we have literals, work with just the number part
+    # Handle cases with literals
     if prefix or suffix:
-        # Special case: if there's no actual number part, it's just a literal string
-        num_info = parse_number(number_part) if number_part else None
+        results = parse_number_to_spec(number_part, prefix, suffix)
 
-        if not num_info and not number_part:
-            # No number at all, just return as literal
-            results.append(('str', f'f"{s}"'))
-            return results
-
-        if num_info:
-            if num_info['type'] == 'hex':
-                # Hex with literals
-                if num_info['padded']:
-                    spec = f'f"{prefix}{{variable:#0{num_info["width"]}x}}{suffix}"'
-                else:
-                    spec = f'f"{prefix}{{variable:#x}}{suffix}"'
-                results.append(('int', spec))
-                return results
-
-            elif num_info['type'] == 'percent':
-                # Percentage with literals
-                sign = '+' if num_info.get('has_sign') else ''
-                spec = build_format_spec(
-                    sign=sign,
-                    decimals=num_info['decimals'],
-                    type_char='%',
-                    prefix=prefix,
-                    suffix=suffix
-                )
-                results.append(('float', spec))
-                return results
-
-            elif num_info['type'] == 'scientific':
-                # Scientific notation with literals
-                sign = '+' if num_info.get('has_sign') else ''
-                spec = f'f"{prefix}{{variable:{sign}e}}{suffix}"'
-                results.append(('float', spec))
-                return results
-
-            elif num_info['type'] == 'zero_pad':
-                # Zero-padded with literals
-                width = num_info['width']
-                decimals = num_info['decimals']
-
-                if decimals:
-                    spec = f'f"{prefix}{{variable:0{width}.{decimals}f}}{suffix}"'
-                    results.append(('float', spec))
-                else:
-                    spec = f'f"{prefix}{{variable:0{width}d}}{suffix}"'
-                    results.append(('int', spec))
-                    spec = f'f"{prefix}{{variable:0{width}.0f}}{suffix}"'
-                    results.append(('float', spec))
-                return results
-
-            elif num_info['type'] == 'number':
-                # Regular number with literals
-                is_float = num_info['is_float']
-                has_comma = num_info['has_comma']
-                decimals = num_info['decimals']
-                sign = '+' if num_info.get('has_sign') else ''
-
-                if not is_float:
-                    # Integer format
-                    spec_int = build_format_spec(
-                        sign=sign,
-                        comma=has_comma,
-                        type_char='d' if not has_comma else '',
-                        prefix=prefix,
-                        suffix=suffix
-                    )
-                    results.append(('int', spec_int))
-
-                    # Float version
-                    spec_float = build_format_spec(
-                        sign=sign,
-                        comma=has_comma,
-                        decimals=0,
-                        type_char='f',
-                        prefix=prefix,
-                        suffix=suffix
-                    )
-                    results.append(('float', spec_float))
-                else:
-                    # Float format
-                    spec_float = build_format_spec(
-                        sign=sign,
-                        comma=has_comma,
-                        decimals=decimals,
-                        type_char='f',
-                        prefix=prefix,
-                        suffix=suffix
-                    )
-                    results.append(('float', spec_float))
-
-                # String version
-                results.append(('str', f'f"{prefix}{{variable}}{suffix}"'))
-                return results
-
-        # If we couldn't parse the number part, treat whole thing as string
-        results.append(('str', f'f"{s}"'))
-        return results
+        # Always add string version
+        spec = FormatSpec(
+            prefix=prefix,
+            suffix=suffix,
+            value_type='str',
+            test_value=0
+        )
+        results.append(spec)
+        return [spec.as_tuple() for spec in results]
 
     # No literals found, check for padding
     core, left_pad, right_pad, fill_char = detect_padding(s)
 
-    # Parse the core value
-    num_info = parse_number(core)
-
-    # Special case: no number found at all
-    if not num_info:
-        # It's just a plain string
-        results.append(('str', f'f"{s}"'))
-        return results
-
-    # Special number formats without padding
-    if not left_pad and not right_pad:
-        # Hex format
-        if num_info and num_info['type'] == 'hex':
-            if num_info['padded']:
-                results.append(('int', f'f"{{variable:#0{num_info["width"]}x}}"'))
-            else:
-                results.append(('int', 'f"{variable:#x}"'))
-            return results
-
-        # Percentage
-        if num_info and num_info['type'] == 'percent':
-            sign = '+' if num_info.get('has_sign') else ''
-            results.append(('float', f'f"{{variable:{sign}.{num_info["decimals"]}%}}"'))
-            return results
-
-        # Scientific notation
-        if num_info and num_info['type'] == 'scientific':
-            sign = '+' if num_info.get('has_sign') else ''
-            results.append(('float', f'f"{{variable:{sign}e}}"'))
-            return results
-
-        # Zero-padded
-        if num_info and num_info['type'] == 'zero_pad':
-            width = num_info['width']
-            decimals = num_info['decimals']
-
-            if decimals:
-                results.append(('float', f'f"{{variable:0{width}.{decimals}f}}"'))
-            else:
-                results.append(('int', f'f"{{variable:0{width}d}}"'))
-                results.append(('float', f'f"{{variable:0{width}.0f}}"'))
-            return results
-
-    # Determine alignment
-    align = ''
+    # Determine alignment and width
     if left_pad and right_pad:
         align = '^'
     elif left_pad:
         align = '>'
     elif right_pad:
         align = '<'
+    else:
+        align = ''
 
     width = len(s) if (left_pad or right_pad) else 0
 
-    # Generate format specs based on the content type
-    if num_info and num_info['type'] == 'number':
-        is_float = num_info['is_float']
-        has_comma = num_info['has_comma']
-        decimals = num_info['decimals']
-        sign = '+' if num_info.get('has_sign') else ''
+    # Parse the core number
+    results = parse_number_to_spec(core, align=align, fill=fill_char, width=width)
 
-        if not is_float:
-            # Integer format
-            spec_int = build_format_spec(align, fill_char, width, has_comma, None, 'd', sign)
-            results.append(('int', spec_int))
-
-            # Float format
-            spec_float = build_format_spec(align, fill_char, width, has_comma, 0, 'f', sign)
-            results.append(('float', spec_float))
-        else:
-            # Float format
-            spec_float = build_format_spec(align, fill_char, width, has_comma, decimals, 'f', sign)
-            results.append(('float', spec_float))
-
-    # String format
+    # Add string format if there's alignment or non-space fill
     if align or fill_char != ' ':
-        spec_str = build_format_spec(align, fill_char, width)
-        results.append(('str', spec_str))
-    else:
-        results.append(('str', 'f"{variable}"'))
+        spec = FormatSpec(
+            align=align,
+            fill=fill_char,
+            width=width,
+            value_type='str'
+        )
+        results.append(spec)
 
-    return results
-
-
-def validate_format(format_spec: str, test_value, expected: str) -> bool:
-    """Validate if a format specification produces the expected output."""
-    try:
-        # Extract the format string and parse prefix/suffix
-        match = re.match(r'f"([^{]*)\{variable:?(.*?)\}([^}]*)"', format_spec)
-        if match:
-            prefix, fmt, suffix = match.groups()
-            result = prefix + (format(test_value, fmt) if fmt else str(test_value)) + suffix
-            return result == expected
-    except (ValueError, TypeError):
-        pass
-    return False
+    return [spec.as_tuple() for spec in results]
 
 
-def get_test_value(input_str: str, type_name: str):
+def get_test_value(input_str, type_name):
     """Determine appropriate test value for validation."""
     # Extract just the numeric part
     prefix, number_part, suffix = split_numeric_literals(input_str)
@@ -444,38 +359,32 @@ def get_test_value(input_str: str, type_name: str):
         input_str = core
 
     if type_name == 'str':
-        # For strings, use the numeric part or core
-        if input_str.endswith('%'):
-            input_str = input_str[:-1]
-        input_str = input_str.replace(',', '').lstrip('+-')
-
-        if re.match(r'^\d+\.?\d*$', input_str):
-            return input_str.split('.')[0] if '.' in input_str else input_str
         return input_str
 
     elif type_name == 'int':
         # Parse as integer
-        num_info = parse_number(input_str)
-        if num_info:
-            value = abs(int(num_info['value']))
-            return value
-
-        # Fallback
-        clean = input_str.replace(',', '').split('.')[0].lstrip('+-')
-        return int(clean) if clean and clean.isdigit() else 0
+        clean = input_str.replace(',', '').removeprefix('+')
+        if clean and clean.removeprefix('-').isdigit():
+            return int(clean)
+        # Try for hex with 0x prefix
+        if HEX_RE.fullmatch(input_str):
+            return int(input_str.removeprefix('0x'), 16)
+        # Try for unprefixed hex
+        if UNPREFIXED_HEX_RE.fullmatch(input_str):
+            return int(input_str, 16)
+        return 0
 
     else:  # float
         # Parse as float
-        num_info = parse_number(input_str)
-        if num_info:
-            if num_info['type'] == 'percent':
-                return num_info['value']
-            else:
-                return abs(float(num_info['value']))
+        clean = input_str.replace(',', '').removeprefix('+')
+        if PERCENT_RE.fullmatch(input_str):
+            clean = clean.removesuffix('%')
+            if clean and NUMBER_RE.fullmatch(clean):
+                return float(clean) / 100
 
-        # Fallback
-        clean = input_str.replace(',', '').lstrip('+-')
-        return float(clean) if clean and re.match(r'^\d+\.?\d*$', clean) else 0.0
+        if clean and NUMBER_RE.fullmatch(clean):
+            return float(clean)
+        return 0.0
 
 
 def main():
@@ -506,7 +415,6 @@ def main():
             # Get test value and validate
             test_value = get_test_value(input_str, type_name)
 
-            assert validate_format(format_spec, test_value, input_str)
             print(f"{type_name:5} → {format_spec}")
             print(f"        (e.g., variable = {repr(test_value)})")
             print()
