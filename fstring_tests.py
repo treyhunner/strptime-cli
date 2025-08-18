@@ -269,6 +269,49 @@ class TestAnalyzeNumberFormat:
         formats = analyze_number_format("  34_")
         assert any(' {variable}_' in f for t, f in formats)
 
+    # ===== Unequal Padding Bug Tests =====
+    def test_unequal_padding_not_center_align(self):
+        """Unequal padding should not be detected as center alignment."""
+        formats = analyze_number_format("  4      ")
+        # This should NOT be center align since padding is unequal (2 vs 6)
+        assert not any('^' in f for t, f in formats), "Unequal padding incorrectly detected as center align"
+        # Should be treated as literals instead
+        assert any('  {variable}      ' in f for t, f in formats), "Should treat as literals"
+
+    def test_slightly_unequal_padding_not_center(self):
+        """Slightly unequal padding should not be center alignment."""
+        formats = analyze_number_format(" 42  ")  # 1 space left, 2 spaces right
+        assert not any('^' in f for t, f in formats), "Slightly unequal padding incorrectly detected as center"
+        assert any(' {variable}  ' in f for t, f in formats), "Should treat as literals"
+
+    def test_very_unequal_padding_not_center(self):
+        """Very unequal padding should definitely not be center alignment."""
+        formats = analyze_number_format("42      ")  # 0 left, 6 right
+        assert not any('^' in f for t, f in formats), "Right-only padding incorrectly detected as center"
+        assert ('int', 'f"{variable:<8d}"') in formats, "Should be left alignment"
+
+    def test_true_center_alignment_equal_padding(self):
+        """Equal padding should be detected as center alignment."""
+        formats = analyze_number_format("  42  ")  # 2 spaces each side
+        assert ('int', 'f"{variable:^6d}"') in formats, "Equal padding should be center align"
+
+    def test_true_center_alignment_single_padding(self):
+        """Single space padding should be detected as center alignment."""
+        formats = analyze_number_format(" 42 ")  # 1 space each side
+        assert ('int', 'f"{variable:^4d}"') in formats, "Single equal padding should be center align"
+
+    def test_off_by_one_padding_not_center(self):
+        """Off-by-one padding should not be center (edge case)."""
+        formats = analyze_number_format("  42   ")  # 2 vs 3 spaces
+        assert not any('^' in f for t, f in formats), "Off-by-one padding incorrectly detected as center"
+        assert any('  {variable}   ' in f for t, f in formats), "Should treat as literals"
+
+    def test_large_unequal_padding(self):
+        """Large unequal padding should be treated as literals."""
+        formats = analyze_number_format("    123        ")  # 4 vs 8 spaces
+        assert not any('^' in f for t, f in formats), "Large unequal padding incorrectly detected as center"
+        assert any('    {variable}        ' in f for t, f in formats), "Should treat as literals"
+
     def test_plain_string(self):
         formats = analyze_number_format("hello")
         assert not formats, "No format specifications"

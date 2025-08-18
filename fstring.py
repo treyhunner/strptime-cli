@@ -335,7 +335,16 @@ def analyze_number_format(s):
 
     # Determine alignment and width
     if left_pad and right_pad:
-        align = '^'
+        if len(left_pad) == len(right_pad):
+            align = '^'  # True center alignment - equal padding on both sides
+        else:
+            # Unequal padding - treat as literals, not alignment
+            spec = FormatSpec(
+                prefix=left_pad,
+                suffix=right_pad,
+                value_type='str'
+            )
+            return [spec.as_tuple()]
     elif left_pad:
         align = '>'
     elif right_pad:
