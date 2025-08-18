@@ -13,12 +13,14 @@ UNPREFIXED_HEX_RE = re.compile(r'[0-9]*[a-fA-F]+[0-9]*')
 PERCENT_RE = re.compile(r'[+-]?\d+\.?\d*%')
 ZERO_PADDED_RE = re.compile(r'0+\d+\.?\d*')
 THOUSANDS_RE = re.compile(r'[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?')
+UNDERSCORE_RE = re.compile(r'[+-]?\d{1,3}(?:_\d{3})+(?:\.\d+)?')
 NUMBER_RE = re.compile(r'[+-]?\d+\.?\d*')
 
 FULL_HEX_RE = re.compile(rf'(.*?)({HEX_RE.pattern})(.*)')
 FULL_UNPREFIXED_HEX_RE = re.compile(rf'()({UNPREFIXED_HEX_RE.pattern})()')
 FULL_PERCENT_RE = re.compile(rf'(.*?)({PERCENT_RE.pattern})(.*)')
 FULL_THOUSANDS_RE = re.compile(rf'(.*?)({THOUSANDS_RE.pattern})(.*)')
+FULL_UNDERSCORE_RE = re.compile(rf'(.*?)({UNDERSCORE_RE.pattern})(.*)')
 FULL_NUMBER_RE = re.compile(rf'(.*?)({NUMBER_RE.pattern})(.*)')
 PAD_CHARS = ' _*'
 
@@ -40,6 +42,7 @@ class FormatSpec:
     fill: str = ''
     width: int = 0
     comma: bool = False
+    underscore: bool = False
     decimals: Optional[int] = None
     type_char: str = ''
     sign: str = ''
@@ -57,6 +60,7 @@ class FormatSpec:
             fill=self.fill,
             width=self.width,
             comma=self.comma,
+            underscore=self.underscore,
             decimals=self.decimals,
             type_char=self.type_char,
             sign=self.sign,
@@ -74,6 +78,7 @@ def build_format_spec(
         fill='',
         width=0,
         comma=False,
+        underscore=False,
         decimals=None,
         type_char='',
         sign='',
@@ -84,16 +89,20 @@ def build_format_spec(
     fill = fill if fill != ' ' else ''
     width_str = str(width) if width else ''
     comma_str = ',' if comma else ''
+    underscore_str = '_' if underscore else ''
     decimals_str = f'.{decimals}' if decimals is not None else ''
 
-    # Special case: integer with comma but no width should omit 'd'
-    if type_char == 'd' and comma and not width:
+    # Choose separator (underscore takes precedence over comma if both somehow set)
+    separator_str = underscore_str or comma_str
+
+    # Special case: integer with separator but no width should omit 'd'
+    if type_char == 'd' and (comma or underscore) and not width:
         type_char = ''
 
     if align:
-        spec = f'{fill}{align}{sign}{width_str}{comma_str}{decimals_str}{type_char}'
+        spec = f'{fill}{align}{sign}{width_str}{separator_str}{decimals_str}{type_char}'
     else:
-        spec = f'{sign}{fill}{width_str}{comma_str}{decimals_str}{type_char}'
+        spec = f'{sign}{fill}{width_str}{separator_str}{decimals_str}{type_char}'
 
     if spec:
         return f'f"{prefix}{{variable:{spec}}}{suffix}"'
@@ -131,8 +140,8 @@ def split_numeric_literals(s):
         if not ((left_pad and not right_pad) or (right_pad and not left_pad)):
             return NumberParts(prefix, num, suffix)
 
-    # Check for regular numbers with thousands separators or regular numbers
-    for regex in [FULL_THOUSANDS_RE, FULL_NUMBER_RE]:
+    # Check for numbers with separators (thousands or underscore) and regular numbers
+    for regex in [FULL_THOUSANDS_RE, FULL_UNDERSCORE_RE, FULL_NUMBER_RE]:
         if match := regex.fullmatch(s):
             prefix, num, suffix = match.groups()
             left_pad = is_padding(prefix)
@@ -249,23 +258,25 @@ def parse_number_to_spec(s, prefix='', suffix='', align='', fill='', width=0):
         results.append(spec)
         return results
 
-    # Regular number
-    clean = s.replace(',', '')
+    # Regular number (check for separators)
+    clean = s.replace(',', '').replace('_', '')
     if NUMBER_RE.fullmatch(clean):
         has_comma = THOUSANDS_RE.fullmatch(s)
+        has_underscore = UNDERSCORE_RE.fullmatch(s)
         decimals = count_decimals(clean)
         has_sign = s.startswith('+')
         sign = '+' if has_sign else ''
         value = float(clean) if decimals else int(clean)
 
         results = []
-        if not decimals and (align or has_comma or sign or fill.strip()):
+        if not decimals and (align or has_comma or has_underscore or sign or fill.strip()):
             # Integer format
             spec = FormatSpec(
                 align=align,
                 fill=fill,
                 width=width,
                 comma=has_comma,
+                underscore=has_underscore,
                 type_char='d',
                 sign=sign,
                 prefix=prefix,
@@ -281,6 +292,7 @@ def parse_number_to_spec(s, prefix='', suffix='', align='', fill='', width=0):
             fill=fill,
             width=width,
             comma=has_comma,
+            underscore=has_underscore,
             decimals=decimals,
             type_char='f',
             sign=sign,
@@ -289,7 +301,7 @@ def parse_number_to_spec(s, prefix='', suffix='', align='', fill='', width=0):
             value_type='float',
             test_value=abs(float(value))
         )
-        if not decimals and has_comma:
+        if not decimals and (has_comma or has_underscore):
             results.insert(0, spec)
         else:
             results.append(spec)
@@ -366,7 +378,7 @@ def get_test_value(input_str, type_name):
 
     elif type_name == 'int':
         # Parse as integer
-        clean = input_str.replace(',', '').removeprefix('+')
+        clean = input_str.replace(',', '').replace('_', '').removeprefix('+')
         if clean and clean.removeprefix('-').isdigit():
             return int(clean)
         # Try for hex with 0x prefix
@@ -379,7 +391,7 @@ def get_test_value(input_str, type_name):
 
     else:  # float
         # Parse as float
-        clean = input_str.replace(',', '').removeprefix('+')
+        clean = input_str.replace(',', '').replace('_', '').removeprefix('+')
         if PERCENT_RE.fullmatch(input_str):
             clean = clean.removesuffix('%')
             if clean and NUMBER_RE.fullmatch(clean):
@@ -396,7 +408,7 @@ def main():
         input_str = sys.argv[1]
     else:
         print("Enter a formatted string (or 'quit' to exit):")
-        input_str = input().strip()
+        input_str = input()
         if input_str.lower() == 'quit':
             return
 

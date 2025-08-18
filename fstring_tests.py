@@ -151,6 +151,48 @@ class TestAnalyzeNumberFormat:
         formats = analyze_number_format("     1,234")
         assert any(',' in f and 'd' in f for t, f in formats if t == 'int')
 
+    # ===== Underscore Separator Tests =====
+    def test_integer_with_underscore(self):
+        formats = analyze_number_format("3_400")
+        # Special case: underscore without width omits 'd'
+        assert ('int', 'f"{variable:_}"') in formats
+        assert ('float', 'f"{variable:_.0f}"') in formats
+
+    def test_float_with_underscore(self):
+        formats = analyze_number_format("3_400.00")
+        assert ('float', 'f"{variable:_.2f}"') in formats
+
+    def test_large_number_with_underscores(self):
+        formats = analyze_number_format("1_234_567")
+        assert ('int', 'f"{variable:_}"') in formats
+
+    def test_million_with_underscores(self):
+        formats = analyze_number_format("1_000_000")
+        assert ('int', 'f"{variable:_}"') in formats
+        assert ('float', 'f"{variable:_.0f}"') in formats
+
+    def test_padded_number_with_underscore(self):
+        formats = analyze_number_format("  3_400.00")
+        assert ('float', 'f"{variable:>10_.2f}"') in formats
+
+    def test_underscore_with_width(self):
+        # When there's a width, 'd' should be kept
+        formats = analyze_number_format("     1_234")
+        assert any('_' in f and 'd' in f for t, f in formats if t == 'int')
+
+    def test_float_decimal_with_underscore(self):
+        formats = analyze_number_format("1_234.56")
+        assert ('float', 'f"{variable:_.2f}"') in formats
+
+    def test_underscore_with_currency_prefix(self):
+        formats = analyze_number_format("$1_000_000")
+        assert ('int', 'f"${variable:_}"') in formats
+        assert ('float', 'f"${variable:_.0f}"') in formats
+
+    def test_underscore_with_currency_suffix(self):
+        formats = analyze_number_format("1_999.99€")
+        assert ('float', 'f"{variable:_.2f}€"') in formats
+
     # ===== Hexadecimal Format Tests =====
     def test_simple_hex(self):
         formats = analyze_number_format("0x4")
@@ -252,6 +294,10 @@ class TestAnalyzeNumberFormat:
         formats = analyze_number_format("$1,234.56")
         assert ('float', 'f"${variable:,.2f}"') in formats
 
+    def test_currency_with_underscore(self):
+        formats = analyze_number_format("$1_234.56")
+        assert ('float', 'f"${variable:_.2f}"') in formats
+
     def test_percentage_with_label(self):
         formats = analyze_number_format("Accuracy: 98.5%")
         assert ('float', 'f"Accuracy: {variable:.1%}"') in formats
@@ -259,6 +305,10 @@ class TestAnalyzeNumberFormat:
     def test_right_aligned_with_comma_and_decimal(self):
         formats = analyze_number_format("  1,234.56")
         assert any(',' in f and '.2f' in f for t, f in formats if t == 'float')
+
+    def test_right_aligned_with_underscore_and_decimal(self):
+        formats = analyze_number_format("  1_234.56")
+        assert any('_' in f and '.2f' in f for t, f in formats if t == 'float')
 
     def test_centered_decimal(self):
         formats = analyze_number_format(" 34.5 ")
@@ -276,6 +326,14 @@ class TestAnalyzeNumberFormat:
     def test_zero_padded_with_sign(self):
         formats = analyze_number_format("+0034")
         assert any('+' in f and '05' in f for t, f in formats)
+
+    def test_underscore_with_left_align(self):
+        formats = analyze_number_format("1_000  ")
+        assert ('int', 'f"{variable:<7_d}"') in formats
+
+    def test_underscore_with_center_align(self):
+        formats = analyze_number_format(" 1_000 ")
+        assert ('int', 'f"{variable:^7_d}"') in formats
 
     # ===== Format Uniqueness Tests =====
     def test_no_duplicate_formats(self):
@@ -332,6 +390,15 @@ class TestGetTestValue:
     def test_get_test_value_int_comma(self):
         assert get_test_value("1,234", "int") == 1234
 
+    def test_get_test_value_int_underscore(self):
+        assert get_test_value("1_234", "int") == 1234
+
+    def test_get_test_value_int_large_underscore(self):
+        assert get_test_value("1_000_000", "int") == 1000000
+
+    def test_get_test_value_int_underscore_with_prefix(self):
+        assert get_test_value("$1_234", "int") == 1234
+
     def test_get_test_value_int_hex(self):
         assert get_test_value("0xff", "int") == 255
 
@@ -364,6 +431,15 @@ class TestGetTestValue:
     def test_get_test_value_float_comma(self):
         assert get_test_value("1,234.56", "float") == 1234.56
 
+    def test_get_test_value_float_underscore(self):
+        assert get_test_value("1_234.56", "float") == 1234.56
+
+    def test_get_test_value_float_large_underscore(self):
+        assert get_test_value("1_000_000.99", "float") == 1000000.99
+
+    def test_get_test_value_float_underscore_with_prefix(self):
+        assert get_test_value("$1_234.56", "float") == 1234.56
+
     def test_get_test_value_float_zero_padded(self):
         assert get_test_value("00123.45", "float") == 123.45
 
@@ -391,6 +467,11 @@ class TestGetTestValue:
         assert get_test_value("0", "float") == 0.0
         assert get_test_value("0", "str") == "0"
 
+    def test_get_test_value_underscore_only(self):
+        assert get_test_value("_", "int") == 0
+        assert get_test_value("_", "float") == 0.0
+        assert get_test_value("_", "str") == "_"
+
 
 class TestRoundTrip:
     """Test that format specs can recreate the original string."""
@@ -412,16 +493,29 @@ class TestRoundTrip:
 
     def test_formatted_numbers(self):
         self.verify_format("1,234", "int")
+        self.verify_format("1_234", "int")
         self.verify_format("$99.99", "float")
         self.verify_format("85%", "float")
         self.verify_format("0x2a", "int")
         self.verify_format("1.5e-3", "float")
+
+    def test_underscore_numbers(self):
+        self.verify_format("1_000", "int")
+        self.verify_format("1_000_000", "int")
+        self.verify_format("1_234.56", "float")
+        self.verify_format("$1_000_000", "int")
+        self.verify_format("1_999.99€", "float")
 
     def test_padded_numbers(self):
         self.verify_format("  42", "int")
         self.verify_format("42  ", "int")
         self.verify_format("_42_", "int")
         self.verify_format("0042", "int")
+
+    def test_complex_underscore_combinations(self):
+        self.verify_format("  1_234.56", "float")
+        self.verify_format("$1_234_567.89", "float")
+        self.verify_format("Total: 1_000_000 units", "str")
 
 
 if __name__ == "__main__":
