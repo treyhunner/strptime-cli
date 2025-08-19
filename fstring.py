@@ -535,22 +535,66 @@ def parse_number_to_spec(s, prefix='', suffix='', align='', fill='', width=0):
     return []
 
 
+def split_datetime_literals(s):
+    """Try to find datetime parts within a string with literals."""
+    # Try to find potential datetime substrings
+    # Look for patterns that commonly appear in datetimes
+    datetime_patterns = [
+        # ISO-like dates
+        re.compile(r'(.*?)(\d{4}-\d{2}-\d{2}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?(?:\s*[AP]M)?)(.*)', re.IGNORECASE),
+        # US dates
+        re.compile(r'(.*?)(\d{1,2}/\d{1,2}/\d{2,4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?\s*[AP]M?)?)(.*)', re.IGNORECASE),
+        # Times
+        re.compile(r'(.*?)(\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AP]M)?)(.*)', re.IGNORECASE),
+        # Month names with dates/years
+        re.compile(r'(.*?)(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}(?:,?\s+\d{4})?(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?(?:\s*[AP]M)?)(.*)', re.IGNORECASE),
+        # Weekday names with dates
+        re.compile(r'(.*?)(\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}(?:\s+\d{4})?(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?(?:\s*[AP]M)?)(.*)', re.IGNORECASE),
+        # Just month or weekday names
+        re.compile(r'(.*?)(\b(?:January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b)(.*)', re.IGNORECASE),
+    ]
+
+    for pattern in datetime_patterns:
+        match = pattern.fullmatch(s)
+        if match:
+            prefix, datetime_part, suffix = match.groups()
+            # Try to detect datetime format on the extracted part
+            datetime_format = detect_datetime_format(datetime_part.strip())
+            if datetime_format:
+                return prefix, datetime_part.strip(), suffix, datetime_format
+
+    return None, s, None, None
+
+
 def analyze_number_format(s):
     """Analyze a string and return possible format specifications."""
     results = []
 
-    # Try datetime detection first
+    # Try datetime detection on full string first
     datetime_format = detect_datetime_format(s)
+    datetime_prefix = ''
+    datetime_suffix = ''
+    datetime_part = s
+
+    # If full string detection failed, try to find datetime parts within literals
+    if not datetime_format:
+        prefix, datetime_part, suffix, datetime_format = split_datetime_literals(s)
+        if datetime_format:
+            datetime_prefix = prefix or ''
+            datetime_suffix = suffix or ''
+
     if datetime_format:
         # Determine test value for datetime
         try:
-            test_dt = datetime.strptime(s, datetime_format)
+            test_dt = datetime.strptime(datetime_part, datetime_format)
         except ValueError:
             test_dt = datetime(2030, 1, 24, 5, 45, 13)  # Default test datetime
 
         spec = FormatSpec(
             value_type='datetime',
             datetime_format=datetime_format,
+            prefix=datetime_prefix,
+            suffix=datetime_suffix,
             test_value=0,  # Not used for datetime
         )
 
@@ -658,13 +702,21 @@ def get_test_value(input_str, type_name):
     """Determine appropriate test value for validation."""
     if type_name == 'datetime':
         # Try to parse the original datetime
-        datetime_format = None
-        try:
-            datetime_format = detect_datetime_format(input_str)
-            if datetime_format:
+        datetime_format = detect_datetime_format(input_str)
+        if datetime_format:
+            try:
                 return datetime.strptime(input_str, datetime_format)
-        except ValueError:
-            pass
+            except ValueError:
+                pass
+
+        # If full string parsing failed, try to extract datetime part from literals
+        prefix, datetime_part, suffix, datetime_format = split_datetime_literals(input_str)
+        if datetime_format:
+            try:
+                return datetime.strptime(datetime_part, datetime_format)
+            except ValueError:
+                pass
+
         # Return default datetime if parsing fails
         return datetime(2030, 1, 24, 5, 45, 13)
 

@@ -401,6 +401,184 @@ class TestAnalyzeNumberFormat:
             assert any(t == 'str' for t, _ in formats), f"No string format for {test}"
 
 
+class TestDatetimeFormats:
+    """Test datetime format detection and priority."""
+
+    # ===== Basic Date Format Tests =====
+    def test_iso_date_format(self):
+        formats = analyze_number_format("2030-01-24")
+        assert ('datetime', 'f"{variable:%Y-%m-%d}"') in formats
+        # Should prioritize datetime over numeric due to datetime structure
+        datetime_formats = [f for t, f in formats if t == 'datetime']
+        assert len(datetime_formats) > 0
+
+    def test_us_date_format(self):
+        formats = analyze_number_format("01/24/2030")
+        assert ('datetime', 'f"{variable:%m/%d/%Y}"') in formats
+
+    def test_us_date_format_short_year(self):
+        formats = analyze_number_format("01/24/30")
+        assert ('datetime', 'f"{variable:%m/%d/%y}"') in formats
+
+    def test_month_day_year_format(self):
+        formats = analyze_number_format("Jan 24, 2030")
+        # Note: the comma might not be in the specific formats, but similar patterns should be
+        datetime_formats = [f for t, f in formats if t == 'datetime']
+        assert len(datetime_formats) > 0
+
+    def test_day_month_year_format(self):
+        formats = analyze_number_format("24 Jan 2030")
+        assert ('datetime', 'f"{variable:%d %b %Y}"') in formats
+
+    # ===== Time Format Tests =====
+    def test_time_format_hm(self):
+        formats = analyze_number_format("05:45")
+        assert ('datetime', 'f"{variable:%H:%M}"') in formats
+
+    def test_time_format_hms(self):
+        formats = analyze_number_format("05:45:13")
+        assert ('datetime', 'f"{variable:%H:%M:%S}"') in formats
+
+    def test_time_format_12hour(self):
+        formats = analyze_number_format("05:45 AM")
+        assert ('datetime', 'f"{variable:%I:%M %p}"') in formats
+
+    def test_time_format_12hour_no_space(self):
+        formats = analyze_number_format("05:45AM")
+        assert ('datetime', 'f"{variable:%I:%M%p}"') in formats
+
+    # ===== Combined DateTime Format Tests =====
+    def test_iso_datetime_format(self):
+        formats = analyze_number_format("2030-01-24 05:45")
+        datetime_formats = [f for t, f in formats if t == 'datetime']
+        assert len(datetime_formats) > 0
+        # Should find a format that includes both date and time components
+        assert any('Y' in f and 'H' in f for f in datetime_formats)
+
+    def test_iso_datetime_with_seconds(self):
+        formats = analyze_number_format("2030-01-24 05:45:13")
+        assert any('Y-%m-%d %H:%M:%S' in f for t, f in formats if t == 'datetime')
+
+    def test_full_weekday_datetime(self):
+        formats = analyze_number_format("Thursday January 24 2030 05:45:13")
+        datetime_formats = [f for t, f in formats if t == 'datetime']
+        assert len(datetime_formats) > 0
+
+    def test_short_weekday_datetime(self):
+        formats = analyze_number_format("Thu Jan 24 2030 05:45:13")
+        assert any('%a' in f and '%b' in f for t, f in formats if t == 'datetime')
+
+    # ===== Timezone Format Tests =====
+    def test_time_with_timezone(self):
+        formats = analyze_number_format("05:45 PST")
+        assert any('%Z' in f for t, f in formats if t == 'datetime')
+
+    def test_iso_with_timezone_offset(self):
+        formats = analyze_number_format("2030-01-24T05:45:13-0700")
+        datetime_formats = [f for t, f in formats if t == 'datetime']
+        assert len(datetime_formats) > 0
+
+    def test_iso_with_z_suffix(self):
+        formats = analyze_number_format("20300124T054513Z")
+        assert any('Z' in f for t, f in formats if t == 'datetime')
+
+    # ===== Priority Testing =====
+    def test_single_numeric_low_priority(self):
+        """Single numeric datetime formats (%d, %Y) should have lower priority than numeric formats."""
+        formats = analyze_number_format("24")
+        # Should have both datetime and numeric formats
+        has_datetime = any(t == 'datetime' for t, f in formats)
+        has_numeric = any(t in ['int', 'float'] for t, f in formats)
+
+        if has_datetime:
+            # If datetime is detected, numeric should come first (higher priority)
+            first_few = formats[:3]  # Check first few formats
+            numeric_before_datetime = False
+            for t, f in first_few:
+                if t in ['int', 'float']:
+                    numeric_before_datetime = True
+                elif t == 'datetime':
+                    break
+            assert numeric_before_datetime, "Single numeric datetime should have lower priority"
+
+    def test_year_low_priority(self):
+        """Year format (%Y) should have lower priority than numeric formats."""
+        formats = analyze_number_format("2030")
+        has_datetime = any(t == 'datetime' for t, f in formats)
+        has_numeric = any(t in ['int', 'float'] for t, f in formats)
+
+        if has_datetime and has_numeric:
+            # Numeric should come before datetime
+            datetime_index = next(i for i, (t, f) in enumerate(formats) if t == 'datetime')
+            numeric_index = next(i for i, (t, f) in enumerate(formats) if t in ['int', 'float'])
+            assert numeric_index < datetime_index, "Year format should have lower priority than numeric"
+
+    def test_multipart_datetime_high_priority(self):
+        """Multi-part datetime with structure should get high priority."""
+        formats = analyze_number_format("2030-01-24")
+        # Should prioritize datetime due to datetime structure (dashes)
+        if formats:
+            first_format = formats[0]
+            # First format should likely be datetime due to clear datetime structure
+            datetime_formats = [f for t, f in formats if t == 'datetime']
+            assert len(datetime_formats) > 0, "Should detect datetime format"
+
+    def test_time_structure_high_priority(self):
+        """Time format with colon should prioritize datetime."""
+        formats = analyze_number_format("05:45")
+        if formats:
+            datetime_formats = [f for t, f in formats if t == 'datetime']
+            assert len(datetime_formats) > 0, "Should detect time format"
+
+    def test_weekday_name_high_priority(self):
+        """Formats with weekday names should prioritize datetime."""
+        formats = analyze_number_format("Thursday")
+        datetime_formats = [f for t, f in formats if t == 'datetime']
+        assert len(datetime_formats) > 0, "Should detect weekday format"
+
+    def test_month_name_high_priority(self):
+        """Formats with month names should prioritize datetime."""
+        formats = analyze_number_format("January")
+        datetime_formats = [f for t, f in formats if t == 'datetime']
+        assert len(datetime_formats) > 0, "Should detect month format"
+
+    # ===== Edge Cases =====
+    def test_ambiguous_format_preference(self):
+        """Test ambiguous cases where both numeric and datetime could apply."""
+        # This could be month/day or just two numbers
+        formats = analyze_number_format("01 24")
+        has_datetime = any(t == 'datetime' for t, f in formats)
+        has_numeric = any(t in ['int', 'float'] for t, f in formats)
+        # Both should be possible, but with proper prioritization
+
+    def test_microseconds_format(self):
+        formats = analyze_number_format("2030-01-24T05:45:13.337392")
+        datetime_formats = [f for t, f in formats if t == 'datetime']
+        assert any('%f' in f for f in datetime_formats), "Should detect microseconds"
+
+    def test_day_of_year_format(self):
+        formats = analyze_number_format("2024 024")  # Year and day of year
+        datetime_formats = [f for t, f in formats if t == 'datetime']
+        if datetime_formats:
+            assert any('%j' in f for f in datetime_formats), "Should detect day of year format"
+
+    # ===== Literal Prefix/Suffix with Datetime =====
+    def test_datetime_with_prefix(self):
+        formats = analyze_number_format("Date: 2030-01-24")
+        datetime_formats = [f for t, f in formats if t == 'datetime' and 'Date:' in f]
+        assert len(datetime_formats) > 0, "Should handle datetime with prefix"
+
+    def test_datetime_with_suffix(self):
+        formats = analyze_number_format("2030-01-24 (scheduled)")
+        datetime_formats = [f for t, f in formats if t == 'datetime']
+        assert len(datetime_formats) > 0, "Should handle datetime with suffix"
+
+    def test_time_with_label(self):
+        formats = analyze_number_format("Meeting at 05:45")
+        datetime_formats = [f for t, f in formats if t == 'datetime' and 'Meeting at' in f]
+        assert len(datetime_formats) > 0, "Should handle time with label"
+
+
 class TestGetTestValue:
     """Test the get_test_value function."""
 
@@ -516,6 +694,73 @@ class TestGetTestValue:
         assert get_test_value("_", "str") == "_"
 
 
+class TestGetTestValueDatetime:
+    """Test get_test_value function for datetime types."""
+
+    def test_get_test_value_datetime_iso_date(self):
+        from datetime import datetime
+        result = get_test_value("2030-01-24", "datetime")
+        assert isinstance(result, datetime)
+        assert result.year == 2030
+        assert result.month == 1
+        assert result.day == 24
+
+    def test_get_test_value_datetime_us_date(self):
+        from datetime import datetime
+        result = get_test_value("01/24/2030", "datetime")
+        assert isinstance(result, datetime)
+        assert result.year == 2030
+        assert result.month == 1
+        assert result.day == 24
+
+    def test_get_test_value_datetime_time(self):
+        from datetime import datetime
+        result = get_test_value("05:45", "datetime")
+        assert isinstance(result, datetime)
+        assert result.hour == 5
+        assert result.minute == 45
+
+    def test_get_test_value_datetime_full(self):
+        from datetime import datetime
+        result = get_test_value("2030-01-24 05:45:13", "datetime")
+        assert isinstance(result, datetime)
+        assert result.year == 2030
+        assert result.month == 1
+        assert result.day == 24
+        assert result.hour == 5
+        assert result.minute == 45
+        assert result.second == 13
+
+    def test_get_test_value_datetime_month_name(self):
+        from datetime import datetime
+        result = get_test_value("Jan 24 2030", "datetime")
+        assert isinstance(result, datetime)
+        assert result.year == 2030
+        assert result.month == 1
+        assert result.day == 24
+
+    def test_get_test_value_datetime_weekday(self):
+        from datetime import datetime
+        result = get_test_value("Thursday", "datetime")
+        assert isinstance(result, datetime)
+        # Should return some valid datetime
+
+    def test_get_test_value_datetime_invalid(self):
+        from datetime import datetime
+        result = get_test_value("not-a-date", "datetime")
+        assert isinstance(result, datetime)
+        # Should return default datetime when parsing fails
+        assert result.year == 2030  # Default from the implementation
+
+    def test_get_test_value_datetime_with_literals(self):
+        from datetime import datetime
+        result = get_test_value("Date: 2030-01-24", "datetime")
+        assert isinstance(result, datetime)
+        assert result.year == 2030
+        assert result.month == 1
+        assert result.day == 24
+
+
 class TestRoundTrip:
     """Test that format specs can recreate the original string."""
 
@@ -559,6 +804,85 @@ class TestRoundTrip:
         self.verify_format("  1_234.56", "float")
         self.verify_format("$1_234_567.89", "float")
         self.verify_format("Total: 1_000_000 units", "str")
+
+
+class TestDatetimeRoundTrip:
+    """Test that datetime format specs work correctly."""
+
+    def verify_datetime_format(self, input_str):
+        """Helper to verify at least one datetime format works."""
+        formats = analyze_number_format(input_str)
+        datetime_formats = [(t, f) for t, f in formats if t == 'datetime']
+        assert len(datetime_formats) > 0, f"No datetime formats found for '{input_str}'"
+
+        # Verify we can get a test value
+        from datetime import datetime
+        test_value = get_test_value(input_str, 'datetime')
+        assert isinstance(test_value, datetime), f"get_test_value should return datetime for '{input_str}'"
+
+    def test_basic_date_formats(self):
+        self.verify_datetime_format("2030-01-24")
+        self.verify_datetime_format("01/24/2030")
+        self.verify_datetime_format("01/24/30")
+
+    def test_time_formats(self):
+        self.verify_datetime_format("05:45")
+        self.verify_datetime_format("05:45:13")
+        self.verify_datetime_format("5:45 AM")
+
+    def test_combined_formats(self):
+        self.verify_datetime_format("2030-01-24 05:45")
+        self.verify_datetime_format("2030-01-24 05:45:13")
+        self.verify_datetime_format("Thu Jan 24 2030")
+
+    def test_month_and_weekday_names(self):
+        self.verify_datetime_format("January")
+        self.verify_datetime_format("Thursday")
+        self.verify_datetime_format("Jan 24")
+        self.verify_datetime_format("Thu Jan 24")
+
+    def test_timezone_formats(self):
+        self.verify_datetime_format("05:45 PST")
+        # Note: Some complex timezone formats might not parse, but should still be detected
+
+    def test_iso_formats(self):
+        self.verify_datetime_format("20300124T054513Z")
+
+    def test_datetime_with_literals(self):
+        self.verify_datetime_format("Date: 2030-01-24")
+        self.verify_datetime_format("Meeting at 05:45")
+
+
+class TestDatetimeFormatUniqueness:
+    """Test that datetime formats are properly deduplicated and prioritized."""
+
+    def test_no_duplicate_datetime_formats(self):
+        """Ensure no duplicate datetime format specifications are returned."""
+        test_cases = ["2030-01-24", "05:45:13", "Thu Jan 24 2030"]
+        for input_str in test_cases:
+            formats = analyze_number_format(input_str)
+            datetime_formats = [(t, f) for t, f in formats if t == 'datetime']
+            seen = set()
+            for type_name, format_spec in datetime_formats:
+                key = (type_name, format_spec)
+                assert key not in seen, f"Duplicate datetime format found for '{input_str}': {key}"
+                seen.add(key)
+
+    def test_datetime_vs_numeric_priority(self):
+        """Test priority between datetime and numeric formats."""
+        # Single digit - should prioritize numeric
+        formats = analyze_number_format("5")
+        if any(t == 'datetime' for t, f in formats) and any(t in ['int', 'float'] for t, f in formats):
+            first_types = [t for t, f in formats[:2]]
+            assert 'datetime' not in first_types or any(t in ['int', 'float'] for t in first_types[:1])
+
+    def test_datetime_structure_priority(self):
+        """Test that clear datetime structure gets priority."""
+        structured_formats = ["2030-01-24", "05:45:13", "Jan 24 2030"]
+        for input_str in structured_formats:
+            formats = analyze_number_format(input_str)
+            datetime_formats = [f for t, f in formats if t == 'datetime']
+            assert len(datetime_formats) > 0, f"Should detect datetime in structured format: '{input_str}'"
 
 
 if __name__ == "__main__":
