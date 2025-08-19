@@ -517,18 +517,12 @@ class TestDatetimeFormats:
         """Multi-part datetime with structure should get high priority."""
         formats = analyze_number_format("2030-01-24")
         # Should prioritize datetime due to datetime structure (dashes)
-        if formats:
-            first_format = formats[0]
-            # First format should likely be datetime due to clear datetime structure
-            datetime_formats = [f for t, f in formats if t == 'datetime']
-            assert len(datetime_formats) > 0, "Should detect datetime format"
+        assert formats[0] == ('datetime', 'f"{variable:%Y-%m-%d}"')
 
     def test_time_structure_high_priority(self):
         """Time format with colon should prioritize datetime."""
         formats = analyze_number_format("05:45")
-        if formats:
-            datetime_formats = [f for t, f in formats if t == 'datetime']
-            assert len(datetime_formats) > 0, "Should detect time format"
+        assert formats[0] == ('datetime', 'f"{variable:%H:%M}"')
 
     def test_weekday_name_high_priority(self):
         """Formats with weekday names should prioritize datetime."""
@@ -570,6 +564,11 @@ class TestDatetimeFormats:
 
     def test_datetime_with_suffix(self):
         formats = analyze_number_format("2030-01-24 (scheduled)")
+        datetime_formats = [f for t, f in formats if t == 'datetime']
+        assert len(datetime_formats) > 0, "Should handle datetime with suffix"
+
+    def test_datetime_punctuation_and_suffix(self):
+        formats = analyze_number_format("19. Aug. 2025, 10:36 Uhr")
         datetime_formats = [f for t, f in formats if t == 'datetime']
         assert len(datetime_formats) > 0, "Should handle datetime with suffix"
 

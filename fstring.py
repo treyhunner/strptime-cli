@@ -491,7 +491,16 @@ def parse_number_to_spec(s, prefix='', suffix='', align='', fill='', width=0):
         decimals = count_decimals(clean)
         has_sign = s.startswith('+')
         sign = '+' if has_sign else ''
-        value = float(clean) if decimals else int(clean)
+
+        # Handle trailing decimal point with no digits after it
+        if '.' in clean and decimals == 0:
+            # Strip trailing decimal point for integer conversion
+            clean_for_int = clean.rstrip('.')
+            value = int(clean_for_int) if clean_for_int else 0
+            float_value = float(clean)
+        else:
+            value = float(clean) if decimals else int(clean)
+            float_value = float(clean)
 
         results = []
         if not decimals and (align or has_comma or has_underscore or sign or fill.strip()):
@@ -524,7 +533,7 @@ def parse_number_to_spec(s, prefix='', suffix='', align='', fill='', width=0):
             prefix=prefix,
             suffix=suffix,
             value_type='float',
-            test_value=abs(float(value))
+            test_value=abs(float_value)
         )
         if not decimals and (has_comma or has_underscore):
             results.insert(0, spec)
