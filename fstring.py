@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """
 f-string format specification finder - reverse engineer format specs from output examples
+Now includes datetime format detection!
 """
 from dataclasses import dataclass, field
 import re
 import sys
 from typing import Optional
+from datetime import datetime
+from warnings import filterwarnings
 
 
 HEX_RE = re.compile(r'0[xX][0-9a-fA-F]+')
@@ -23,6 +26,163 @@ FULL_THOUSANDS_RE = re.compile(rf'(.*?)({THOUSANDS_RE.pattern})(.*)')
 FULL_UNDERSCORE_RE = re.compile(rf'(.*?)({UNDERSCORE_RE.pattern})(.*)')
 FULL_NUMBER_RE = re.compile(rf'(.*?)({NUMBER_RE.pattern})(.*)')
 PAD_CHARS = ' _*'
+
+# Datetime detection components (from strptime.py)
+PARTS_RE = re.compile(r"""
+    (
+        # %S%z matching
+        [0-9]{2}
+        [+-] \d{2} :? \d{2}
+    |
+        [A-Za-z0-9]+
+    )
+""", flags=re.VERBOSE)
+
+specific_custom_formats = [
+    "%m/%d/%Y %I:%M %p",
+    "%m/%d/%Y",
+    "%m/%d/%y",
+    "%m-%d-%Y",
+    "%c",
+]
+
+generic_formats = {
+    1: [
+        ["%Y%m%dT%H%M%SZ"],                                 # 20300124T054513Z
+        ["%A"],                                             # Thursday
+        ["%a"],                                             # Thu
+        ["%b"],                                             # Jan
+        ["%B"],                                             # January
+        ["%d"],                                             # 24
+        ["%Y"],                                             # 2024
+    ],
+    2: [
+        ["%Y", "%j"],                                       # 2024 24 (day of year)
+        ["%b", "%d"],                                       # Jan 24
+        ["%B", "%d"],                                       # January 24
+        ["%d", "%b"],                                       # 24 Jan
+        ["%d", "%B"],                                       # 24 January
+        ["%b", "%Y"],                                       # Jan 2024
+        ["%a", "%b"],                                       # Thu Jan
+        ["%a", "%B"],                                       # Thu January
+        ["%A", "%b"],                                       # Thursday Jan
+        ["%A", "%B"],                                       # Thursday January
+        ["%H", "%M"],                                       # 05 45
+        ["%I", "%M%p"],                                     # 05 45AM
+    ],
+    3: [
+        ["%Y", "%m", "%d"],                                 # 2030 01 24
+        ["%B", "%d", "%Y"],                                 # January 24 2030
+        ["%d", "%b", "%Y"],                                 # 24 Jan 2030
+        ["%b", "%d", "%Y"],                                 # Jan 24 2030
+        ["%d", "%m", "%Y"],                                 # 23 01 2024
+        ["%H", "%M", "%S"],                                 # 05 45 13
+        ["%a", "%b", "%d"],                                 # Thu Jan 24
+        ["%A", "%B", "%d"],                                 # Thursday January 24
+        ["%A", "%b", "%d"],                                 # Thursday Jan 24
+        ["%a", "%B", "%d"],                                 # Thu January 24
+        ["%a", "%d", "%b"],                                 # Thu 24 Jan
+        ["%A", "%d", "%B"],                                 # Thursday 24 January
+        ["%A", "%d", "%b"],                                 # Thursday 24 Jan
+        ["%a", "%d", "%B"],                                 # Thu 24 January
+        ["%H", "%M", "%Z"],                                 # 05 45 PST
+        ["%I", "%M", "%p"],                                 # 05 45 AM
+        ["%H", "%M", "%S%z"],                               # 05 45 13-0700
+        ["%I", "%M", "%S%p"],                               # 05 45 13AM
+    ],
+    4: [
+        ["%a", "%b", "%d", "%Y"],                           # Thu Jan 24 2030
+        ["%A", "%B", "%d", "%Y"],                           # Thursday January 24 2030
+        ["%A", "%b", "%d", "%Y"],                           # Thursday Jan 24 2030
+        ["%a", "%B", "%d", "%Y"],                           # Thu January 24 2030
+        ["%A", "%d", "%B", "%Y"],                           # Thursday 24 January 2030
+        ["%a", "%d", "%b", "%Y"],                           # Thu 24 Jan 2030
+        ["%H", "%M", "%S", "%Z"],                           # 05 45 13 PST
+        ["%I", "%M", "%S", "%p"],                           # 05 45 13 AM
+    ],
+    5: [
+        ["%Y", "%m", "%dT%H", "%M", "%S%z"],                # 2030 01 24T05 45 13-0700
+        ["%Y", "%m", "%dT%H", "%M", "%S"],                  # 2030 01 24T05 45 13
+        ["%d", "%b", "%Y", "%H", "%M"],                     # 24 Jan 2030 05 45
+        ["%b", "%d", "%Y", "%H", "%M"],                     # Jan 24 2030 05 45
+        ["%d", "%B", "%Y", "%H", "%M"],                     # 24 January 2030 05 45
+        ["%B", "%d", "%Y", "%H", "%M"],                     # January 24 2030 05 45
+        ["%Y", "%m", "%d", "%H", "%M"],                     # 2030 01 24 05 45
+        ["%Y", "%m", "%d", "%I", "%M%p"],                   # 2030 01 24 24 05 45AM
+        ["%d", "%m", "%Y", "%H", "%M"],                     # 24 01 2030 05 45
+        ["%b", "%d", "%Y", "%I", "%M%p"],                   # Jan 24 2030 05 45AM
+        ["%d", "%b", "%Y", "%I", "%M%p"],                   # 24 Jan 2030 05 45AM
+        ["%B", "%d", "%Y", "%I", "%M%p"],                   # January 24 2030 05 45AM
+        ["%d", "%B", "%Y", "%I", "%M%p"],                   # 24 January 2030 05 45AM
+    ],
+    6: [
+        ["%b", "%d", "%Y", "%H", "%M", "%S"],               # Jan 24 2030 05 45 13
+        ["%Y", "%m", "%d", "%H", "%M", "%S"],               # 2030 01 24 05 45 13
+        ["%d", "%m", "%Y", "%H", "%M", "%S"],               # 24 01 2030 05 45 13
+        ["%Y", "%m", "%d", "%H", "%M", "%S%z"],             # 2030 01 24 05 45 13PST
+        ["%Y", "%m", "%d", "%H", "%M", "%SZ"],              # 2030 01 24 05 45 13Z
+        ["%a", "%d", "%b", "%Y", "%H", "%M"],               # Thu 24 Jan 2030 05 45
+        ["%a", "%d", "%b", "%Y", "%I", "%M%p"],             # Thu 24 Jan 2030 05 45AM
+        ["%m", "%d", "%Y", "%I", "%M", "%p"],               # 01 24 2030 05 45 AM
+        ["%d", "%b", "%Y", "%H", "%M", "%S"],               # 24 Jan 2030 05 45 13
+        ["%Y", "%m", "%dT%H", "%M", "%S", "%fZ"],           # 2030 01 24T05 45 13 337392Z
+        ["%Y", "%m", "%dT%H", "%M", "%S", "%f"],            # 2030 01 24T05 45 13 337392
+        ["%b", "%d", "%Y", "%I", "%M", "%p"],               # Jan 24 2030 05 45 AM
+        ["%B", "%d", "%Y", "%H", "%M", "%S"],               # January 24 2030 05 45 13
+        ["%A", "%d", "%B", "%Y", "%H", "%M"],               # Thursday 24 January 2030 05 45
+        ["%A", "%d", "%B", "%Y", "%I", "%M%p"],             # Thursday 24 January 2030 05 45AM
+        ["%d", "%B", "%Y", "%H", "%M", "%S"],               # 24 January 2030 05 45 13
+        ["%B", "%d", "%Y", "%I", "%M", "%p"],               # January 24 2030 05 45 AM
+        ["%A", "%d", "%b", "%Y", "%H", "%M"],               # Thursday 24 Jan 2030 05 45
+        ["%A", "%d", "%b", "%Y", "%I", "%M%p"],             # Thursday 24 Jan 2030 05 45AM
+    ],
+    7: [
+        ["%a", "%d", "%b", "%Y", "%H", "%M", "%S"],         # Thu 24 Jan 2030 05 45 13
+        ["%a", "%b", "%d", "%Y", "%H", "%M", "%S"],         # Thu Jan 24 2030 05 45 13
+        ["%m", "%d", "%Y", "%I", "%M", "%S", "%p"],         # 01 24 2030 05 45 13 AM
+        ["%b", "%d", "%Y", "%H", "%M", "%S", "%Z"],         # Jan 24 2030 05 45 13 PST
+        ["%d", "%b", "%Y", "%H", "%M", "%S", "%Z"],         # 24 Jan 2030 05 45 13 PST
+        ["%Y", "%m", "%d", "%H", "%M", "%S", "%f"],         # 2030 01 24 05 45 13 337392
+        ["%A", "%d", "%B", "%Y", "%H", "%M", "%S"],         # Thursday 24 January 2030 05 45 13
+        ["%A", "%B", "%d", "%Y", "%H", "%M", "%S"],         # Thursday January 24 2030 05 45 13
+        ["%A", "%d", "%b", "%Y", "%H", "%M", "%S"],         # Thursday 24 Jan 2030 05 45 13
+        ["%A", "%b", "%d", "%Y", "%H", "%M", "%S"],         # Thursday Jan 24 2030 05 45 13
+        ["%a", "%d", "%B", "%Y", "%H", "%M", "%S"],         # Thu 24 January 2030 05 45 13
+        ["%a", "%B", "%d", "%Y", "%H", "%M", "%S"],         # Thu January 24 2030 05 45 13
+        ["%d", "%B", "%Y", "%H", "%M", "%S", "%Z"],         # 24 January 2030 05 45 13 PST
+        ["%A", "%d", "%B", "%Y", "%I", "%M", "%S%p"],       # Thursday 24 January 2030 05 45 13AM
+        ["%A", "%B", "%d", "%Y", "%I", "%M", "%S%p"],       # Thursday January 24 2030 05 45 13AM
+        ["%A", "%d", "%b", "%Y", "%I", "%M", "%S%p"],       # Thursday 24 Jan 2030 05 45 13AM
+        ["%A", "%b", "%d", "%Y", "%I", "%M", "%S%p"],       # Thursday Jan 24 2030 05 45 13AM
+        ["%a", "%d", "%B", "%Y", "%I", "%M", "%S%p"],       # Thu 24 January 2030 05 45 13AM
+        ["%a", "%B", "%d", "%Y", "%I", "%M", "%S%p"],       # Thu January 24 2030 05 45 13AM
+        ["%a", "%d", "%b", "%Y", "%I", "%M", "%p"],         # Thu 24 Jan 2030 05 45 AM
+        ["%A", "%d", "%B", "%Y", "%I", "%M", "%p"],         # Thursday 24 January 2030 05 45 AM
+        ["%A", "%B", "%d", "%Y", "%I", "%M", "%p"],         # Thursday January 24 2030 05 45 AM
+        ["%A", "%d", "%b", "%Y", "%I", "%M", "%p"],         # Thursday 24 Jan 2030 05 45 AM
+        ["%A", "%b", "%d", "%Y", "%I", "%M", "%p"],         # Thursday Jan 24 2030 05 45 AM
+        ["%a", "%d", "%B", "%Y", "%I", "%M", "%p"],         # Thu 24 January 2030 05 45 AM
+        ["%a", "%B", "%d", "%Y", "%I", "%M", "%p"],         # Thu January 24 2030 05 45 AM
+    ],
+    8: [
+        ["%a", "%d", "%b", "%Y", "%H", "%M", "%S", "%Z"],   # Thu 24 Jan 2030 05 45 13 PST
+        ["%a", "%b", "%d", "%Y", "%H", "%M", "%S", "%Z"],   # Thu Jan 24 2030 05 45 13 PST
+        ["%A", "%d", "%B", "%Y", "%H", "%M", "%S", "%Z"],   # Thursday 24 January 2030 05 45 13 PST
+        ["%A", "%B", "%d", "%Y", "%H", "%M", "%S", "%Z"],   # Thursday January 24 2030 05 45 13 PST
+        ["%A", "%d", "%b", "%Y", "%H", "%M", "%S", "%Z"],   # Thursday 24 Jan 2030 05 45 13 PST
+        ["%A", "%b", "%d", "%Y", "%H", "%M", "%S", "%Z"],   # Thursday Jan 24 2030 05 45 13 PST
+        ["%a", "%d", "%B", "%Y", "%H", "%M", "%S", "%Z"],   # Thu 24 January 2030 05 45 13 PST
+        ["%a", "%B", "%d", "%Y", "%H", "%M", "%S", "%Z"],   # Thu January 24 2030 05 45 13 PST
+        ["%a", "%d", "%b", "%Y", "%I", "%M", "%S", "%p"],   # Thu 24 Jan 2030 05 45 13 AM
+        ["%a", "%b", "%d", "%Y", "%I", "%M", "%S", "%p"],   # Thu Jan 24 2030 05 45 13 AM
+        ["%A", "%d", "%B", "%Y", "%I", "%M", "%S", "%p"],   # Thursday 24 January 2030 05 45 13 AM
+        ["%A", "%B", "%d", "%Y", "%I", "%M", "%S", "%p"],   # Thursday January 24 2030 05 45 13 AM
+        ["%A", "%d", "%b", "%Y", "%I", "%M", "%S", "%p"],   # Thursday 24 Jan 2030 05 45 13 AM
+        ["%A", "%b", "%d", "%Y", "%I", "%M", "%S", "%p"],   # Thursday Jan 24 2030 05 45 13 AM
+        ["%a", "%d", "%B", "%Y", "%I", "%M", "%S", "%p"],   # Thu 24 January 2030 05 45 13 AM
+        ["%a", "%B", "%d", "%Y", "%I", "%M", "%S", "%p"],   # Thu January 24 2030 05 45 13 AM
+    ],
+}
 
 
 @dataclass
@@ -50,23 +210,30 @@ class FormatSpec:
     suffix: str = ''
 
     # Metadata for generating variations
-    value_type: str = 'str'  # 'int', 'float', or 'str'
+    value_type: str = 'str'  # 'int', 'float', 'str', or 'datetime'
     test_value: float = 0
+    datetime_format: str = ''  # For datetime types, stores the strptime format
 
     def build(self):
         """Build the format specification string."""
-        return build_format_spec(
-            align=self.align,
-            fill=self.fill,
-            width=self.width,
-            comma=self.comma,
-            underscore=self.underscore,
-            decimals=self.decimals,
-            type_char=self.type_char,
-            sign=self.sign,
-            prefix=self.prefix,
-            suffix=self.suffix
-        )
+        if self.value_type == 'datetime':
+            if self.datetime_format:
+                return f'f"{self.prefix}{{variable:{self.datetime_format}}}{self.suffix}"'
+            else:
+                return f'f"{self.prefix}{{variable}}{self.suffix}"'
+        else:
+            return build_format_spec(
+                align=self.align,
+                fill=self.fill,
+                width=self.width,
+                comma=self.comma,
+                underscore=self.underscore,
+                decimals=self.decimals,
+                type_char=self.type_char,
+                sign=self.sign,
+                prefix=self.prefix,
+                suffix=self.suffix
+            )
 
     def as_tuple(self):
         """Return (value_type, format_spec) tuple for compatibility."""
@@ -167,6 +334,64 @@ def detect_padding(s, pad_chars=PAD_CHARS):
             return core, left_pad, right_pad, char
 
     return s, '', '', ' '
+
+
+# Datetime detection functions (from strptime.py)
+def make_new_format(format_parts, date_string_parts):
+    format_parts = iter(format_parts)
+    date_string_parts = iter(date_string_parts)
+    date_format = ""
+    for string_part in date_string_parts:
+        if PARTS_RE.fullmatch(string_part):
+            date_format += next(format_parts)
+        else:
+            date_format += string_part
+    return date_format
+
+
+def can_parse(date_format, text):
+    try:
+        datetime.strptime(text, date_format)
+    except ValueError:
+        return False
+    else:
+        return True
+
+
+def detect_datetime_format(text):
+    """Detect datetime format from text string."""
+    filterwarnings(
+        "ignore",
+        category=DeprecationWarning,
+        message=r"[\s\S]*https://github.com/python/cpython/issues/70647[\s\S]*",
+    )
+
+    for date_format in specific_custom_formats:
+        if can_parse(date_format, text):
+            return date_format
+
+    all_parts = [p for p in PARTS_RE.split(text) if p]
+    significant_parts = len([p for p in all_parts if PARTS_RE.fullmatch(p)])
+
+    for format_parts in generic_formats.get(significant_parts, []):
+        date_format = make_new_format(format_parts, all_parts)
+        if can_parse(date_format, text):
+            return date_format
+
+    return None
+
+
+def is_single_numeric_datetime_format(datetime_format):
+    """Check if datetime format is just a single numeric component like %d or %Y."""
+    single_numeric_formats = {"%d", "%m", "%y", "%Y", "%H", "%I", "%M", "%S", "%j"}
+    return datetime_format in single_numeric_formats
+
+
+def has_datetime_structure(s):
+    """Check if string has structure that suggests datetime (spaces, dashes, colons, etc)."""
+    # Look for separators that commonly appear in datetime strings
+    datetime_separators = {' ', '-', '/', ':', 'T', '+'}
+    return any(sep in s for sep in datetime_separators)
 
 
 def parse_number_to_spec(s, prefix='', suffix='', align='', fill='', width=0):
@@ -312,13 +537,43 @@ def parse_number_to_spec(s, prefix='', suffix='', align='', fill='', width=0):
 
 def analyze_number_format(s):
     """Analyze a string and return possible format specifications."""
+    results = []
 
+    # Try datetime detection first
+    datetime_format = detect_datetime_format(s)
+    if datetime_format:
+        # Determine test value for datetime
+        try:
+            test_dt = datetime.strptime(s, datetime_format)
+        except ValueError:
+            test_dt = datetime(2030, 1, 24, 5, 45, 13)  # Default test datetime
+
+        spec = FormatSpec(
+            value_type='datetime',
+            datetime_format=datetime_format,
+            test_value=0,  # Not used for datetime
+        )
+
+        # Check if this is a single numeric component
+        is_single_numeric = is_single_numeric_datetime_format(datetime_format)
+
+        if is_single_numeric:
+            # Single numeric datetime formats get lower priority
+            datetime_results = [spec.as_tuple()]
+        else:
+            # Multi-part datetime formats get higher priority
+            datetime_results = [spec.as_tuple()]
+    else:
+        datetime_results = []
+        is_single_numeric = False
+
+    # Continue with existing numeric format detection
     # First, split into literals and numeric part
     prefix, number_part, suffix = split_numeric_literals(s)
 
     # Handle cases with literals
     if prefix or suffix:
-        results = parse_number_to_spec(number_part, prefix, suffix)
+        numeric_results = parse_number_to_spec(number_part, prefix, suffix)
 
         # Always add string version
         spec = FormatSpec(
@@ -327,52 +582,93 @@ def analyze_number_format(s):
             value_type='str',
             test_value=0
         )
-        results.append(spec)
-        return [spec.as_tuple() for spec in results]
-
-    # No literals found, check for padding
-    core, left_pad, right_pad, fill_char = detect_padding(s)
-
-    # Determine alignment and width
-    if left_pad and right_pad:
-        if len(left_pad) == len(right_pad):
-            align = '^'  # True center alignment - equal padding on both sides
-        else:
-            # Unequal padding - treat as literals, not alignment
-            spec = FormatSpec(
-                prefix=left_pad,
-                suffix=right_pad,
-                value_type='str'
-            )
-            return [spec.as_tuple()]
-    elif left_pad:
-        align = '>'
-    elif right_pad:
-        align = '<'
+        numeric_results.append(spec)
+        numeric_results = [spec.as_tuple() for spec in numeric_results]
     else:
-        align = ''
+        # No literals found, check for padding
+        core, left_pad, right_pad, fill_char = detect_padding(s)
 
-    width = len(s) if (left_pad or right_pad) else 0
+        # Determine alignment and width
+        if left_pad and right_pad:
+            if len(left_pad) == len(right_pad):
+                align = '^'  # True center alignment - equal padding on both sides
+            else:
+                # Unequal padding - treat as literals, not alignment
+                spec = FormatSpec(
+                    prefix=left_pad,
+                    suffix=right_pad,
+                    value_type='str'
+                )
+                return [spec.as_tuple()]
+        elif left_pad:
+            align = '>'
+        elif right_pad:
+            align = '<'
+        else:
+            align = ''
 
-    # Parse the core number
-    results = parse_number_to_spec(core, align=align, fill=fill_char, width=width)
+        width = len(s) if (left_pad or right_pad) else 0
 
-    # Add string format if there's alignment or non-space fill
-    if align or fill_char != ' ':
-        spec = FormatSpec(
-            align=align,
-            fill=fill_char,
-            width=width,
-            value_type='str'
-        )
-        results.append(spec)
+        # Parse the core number
+        if left_pad or right_pad:
+            numeric_results = parse_number_to_spec(core, align=align, fill=fill_char, width=width)
 
-    return [spec.as_tuple() for spec in results]
+            # Add string format if there's alignment or non-space fill
+            if align or fill_char != ' ':
+                spec = FormatSpec(
+                    align=align,
+                    fill=fill_char,
+                    width=width,
+                    value_type='str'
+                )
+                numeric_results.append(spec)
+        else:
+            numeric_results = parse_number_to_spec(core, align=align, fill=fill_char, width=width)
+
+        numeric_results = [spec.as_tuple() for spec in numeric_results]
+
+    # Now combine results with proper priority ordering
+    # Priority rules:
+    # 1. Multi-part datetime formats (highest priority when datetime structure detected)
+    # 2. Numeric formats (int/float)
+    # 3. String formats
+    # 4. Single numeric datetime formats (lowest priority)
+
+    if datetime_results and not is_single_numeric:
+        # Multi-part datetime: prioritize datetime if string has datetime structure
+        if has_datetime_structure(s):
+            results.extend(datetime_results)
+            results.extend(numeric_results)
+        else:
+            # No clear datetime structure, prioritize numeric
+            results.extend(numeric_results)
+            results.extend(datetime_results)
+    elif datetime_results and is_single_numeric:
+        # Single numeric datetime: lowest priority
+        results.extend(numeric_results)
+        results.extend(datetime_results)
+    else:
+        # No datetime formats found, just use numeric results
+        results.extend(numeric_results)
+
+    return results
 
 
 def get_test_value(input_str, type_name):
     """Determine appropriate test value for validation."""
-    # Extract just the numeric part
+    if type_name == 'datetime':
+        # Try to parse the original datetime
+        datetime_format = None
+        try:
+            datetime_format = detect_datetime_format(input_str)
+            if datetime_format:
+                return datetime.strptime(input_str, datetime_format)
+        except ValueError:
+            pass
+        # Return default datetime if parsing fails
+        return datetime(2030, 1, 24, 5, 45, 13)
+
+    # Extract just the numeric part for non-datetime types
     prefix, number_part, suffix = split_numeric_literals(input_str)
     if prefix or suffix:
         input_str = number_part
@@ -439,8 +735,8 @@ def main():
             # Get test value and validate
             test_value = get_test_value(input_str, type_name)
 
-            print(f"{type_name:5} → {format_spec}")
-            print(f"        (e.g., variable = {repr(test_value)})")
+            print(f"{type_name:8} → {format_spec}")
+            print(f"           (e.g., variable = {repr(test_value)})")
             print()
 
 
