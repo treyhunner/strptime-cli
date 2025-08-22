@@ -251,6 +251,47 @@ class TestAnalyzeNumberFormat:
         formats = analyze_number_format("-5.5%")
         assert ('float', 'f"{variable:.1%}"') in formats
 
+    # ===== Percentage with Alignment Tests =====
+    def test_right_aligned_percentage(self):
+        formats = analyze_number_format("  25%")
+        assert ('float', 'f"{variable:>5.0%}"') in formats
+
+    def test_left_aligned_percentage(self):
+        formats = analyze_number_format("25%  ")
+        assert ('float', 'f"{variable:<5.0%}"') in formats
+
+    def test_center_aligned_percentage(self):
+        formats = analyze_number_format(" 25% ")
+        assert ('float', 'f"{variable:^5.0%}"') in formats
+
+    def test_right_aligned_decimal_percentage(self):
+        formats = analyze_number_format("  34.5%")
+        assert ('float', 'f"{variable:>7.1%}"') in formats
+
+    def test_left_aligned_decimal_percentage(self):
+        formats = analyze_number_format("34.5%  ")
+        assert ('float', 'f"{variable:<7.1%}"') in formats
+
+    def test_center_aligned_decimal_percentage(self):
+        formats = analyze_number_format(" 34.5% ")
+        assert ('float', 'f"{variable:^7.1%}"') in formats
+
+    def test_custom_fill_percentage(self):
+        formats = analyze_number_format("**25%")
+        assert ('float', 'f"{variable:*>5.0%}"') in formats
+
+    def test_underscore_fill_percentage(self):
+        formats = analyze_number_format("__34.5%")
+        assert ('float', 'f"{variable:_>7.1%}"') in formats
+
+    def test_star_fill_left_aligned_percentage(self):
+        formats = analyze_number_format("25%**")
+        assert ('float', 'f"{variable:*<5.0%}"') in formats
+
+    def test_percentage_with_sign_and_alignment(self):
+        formats = analyze_number_format(" +12.5%")
+        assert ('float', 'f"{variable:>+7.1%}"') in formats
+
     # ===== Edge Cases =====
     def test_single_digit(self):
         formats = analyze_number_format("5")

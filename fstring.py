@@ -295,7 +295,17 @@ def split_numeric_literals(s):
 
     # Check for percentage
     if match := FULL_PERCENT_RE.fullmatch(s):
-        return NumberParts(*match.groups())
+        prefix, num, suffix = match.groups()
+        # Check if prefix/suffix look like padding
+        left_pad = is_padding(prefix)
+        right_pad = is_padding(suffix)
+        if (
+                (left_pad or right_pad)
+                and (left_pad != right_pad or prefix[0] == suffix[0])
+        ):
+            return NumberParts('', s, '')
+
+        return NumberParts(prefix, num, suffix)
 
     # Check for unprefixed hex (must contain a-f or A-F)
     if match := FULL_UNPREFIXED_HEX_RE.fullmatch(s):
@@ -439,6 +449,9 @@ def parse_number_to_spec(s, prefix='', suffix='', align='', fill='', width=0):
         decimals = count_decimals(num)
         has_sign = num.startswith('+')  # Only + triggers sign format, not -
         return [FormatSpec(
+            align=align,
+            fill=fill,
+            width=width,
             sign='+' if has_sign else '',
             decimals=decimals,
             type_char='%',
