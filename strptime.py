@@ -59,6 +59,7 @@ generic_formats = {
     3: [
         ["%Y", "%m", "%d"],                                 # 2030 01 24
         ["%B", "%d", "%Y"],                                 # January 24 2030
+        ["%d", "%B", "%Y"],                                 # 24 January 2030
         ["%d", "%b", "%Y"],                                 # 24 Jan 2030
         ["%b", "%d", "%Y"],                                 # Jan 24 2030
         ["%d", "%m", "%Y"],                                 # 23 01 2024
@@ -82,6 +83,7 @@ generic_formats = {
         ["%A", "%b", "%d", "%Y"],                           # Thursday Jan 24 2030
         ["%a", "%B", "%d", "%Y"],                           # Thu January 24 2030
         ["%A", "%d", "%B", "%Y"],                           # Thursday 24 January 2030
+        ["%a", "%d", "%B", "%Y"],                           # Thu 24 January 2030
         ["%a", "%d", "%b", "%Y"],                           # Thu 24 Jan 2030
         ["%H", "%M", "%S", "%Z"],                           # 05 45 13 PST
         ["%I", "%M", "%S", "%p"],                           # 05 45 13 AM
@@ -121,6 +123,12 @@ generic_formats = {
         ["%B", "%d", "%Y", "%I", "%M", "%p"],               # January 24 2030 05 45 AM
         ["%A", "%d", "%b", "%Y", "%H", "%M"],               # Thursday 24 Jan 2030 05 45
         ["%A", "%d", "%b", "%Y", "%I", "%M%p"],             # Thursday 24 Jan 2030 05 45AM
+        ["%a", "%B", "%d", "%Y", "%H", "%M"],               # Thu January 24 2030 05 45
+        ["%a", "%B", "%d", "%Y", "%I", "%M%p"],             # Thu January 24 2030 05 45AM
+        ["%a", "%d", "%B", "%Y", "%H", "%M"],               # Thu 24 January 2030 05 45
+        ["%a", "%d", "%B", "%Y", "%I", "%M%p"],             # Thu 24 January 2030 05 45AM
+        ["%A", "%B", "%d", "%Y", "%H", "%M"],               # Thursday January 24 2030 05 45
+        ["%A", "%B", "%d", "%Y", "%I", "%M%p"],             # Thursday January 24 2030 05 45AM
     ],
     7: [
         ["%a", "%d", "%b", "%Y", "%H", "%M", "%S"],         # Thu 24 Jan 2030 05 45 13

@@ -55,6 +55,23 @@ def test_main_with_invalid_format(mock_argv):
     ("24 Jan 2030", "%d %b %Y"),
     ("2030-01-24 05:45:30.123456", "%Y-%m-%d %H:%M:%S.%f"),
     ("2030-024", "%Y-%j"),
+    # Full month name, day before month — "6 January, 2025" style
+    ("6 January, 2025", "%d %B, %Y"),
+    ("6 January 2025", "%d %B %Y"),
+    # Abbreviated weekday + day + full month
+    ("Mon 6 January, 2025", "%a %d %B, %Y"),
+    ("Mon 6 January 2025", "%a %d %B %Y"),
+    # Abbreviated weekday + full month + day + 24h time
+    ("Mon January 6, 2025 13:40", "%a %B %d, %Y %H:%M"),
+    # Abbreviated weekday + full month + day + 12h time (attached and lowercase)
+    ("Mon January 6, 2025 1:40PM", "%a %B %d, %Y %I:%M%p"),
+    ("Mon January 6, 2025 1:40pm", "%a %B %d, %Y %I:%M%p"),
+    # Abbreviated weekday + day + full month + time
+    ("Mon 6 January, 2025 13:40", "%a %d %B, %Y %H:%M"),
+    ("Mon 6 January, 2025 1:40PM", "%a %d %B, %Y %I:%M%p"),
+    # Full weekday + full month + day + time
+    ("Monday January 6, 2025 13:40", "%A %B %d, %Y %H:%M"),
+    ("Monday January 6, 2025 1:40PM", "%A %B %d, %Y %I:%M%p"),
 ])
 def test_various_date_formats(mock_argv, capsys, date_string, expected_format):
     mock_argv([date_string])
