@@ -53,6 +53,9 @@ def test_main_with_invalid_format(mock_argv):
     ("2030-01-24", "%Y-%m-%d"),
     ("January 24, 2030", "%B %d, %Y"),
     ("24 Jan 2030", "%d %b %Y"),
+    ("February 2026", "%B %Y"),
+    ("24 February 2030", "%d %B %Y"),
+    ("Thu 24 February 2030", "%a %d %B %Y"),
     ("2030-01-24 05:45:30.123456", "%Y-%m-%d %H:%M:%S.%f"),
     ("2030-024", "%Y-%j"),
 ])
