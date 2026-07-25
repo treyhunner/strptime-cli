@@ -3,18 +3,17 @@ Usage:
 $ python -m strptime "2030-01-24 05:45"
 %Y-%m-%d %H:%M
 """
-from datetime import datetime
+
 import re
 import sys
+from datetime import datetime
 from warnings import filterwarnings
 
+NO_FORMAT = "\033[0m"
+F_BOLD = "\033[1m"
 
-__version__ = "0.4.0"
-
-NO_FORMAT="\033[0m"
-F_BOLD="\033[1m"
-
-PARTS_RE = re.compile(r"""
+PARTS_RE = re.compile(
+    r"""
     (
         # %S%z matching
         [0-9]{2}
@@ -22,7 +21,9 @@ PARTS_RE = re.compile(r"""
     |
         [A-Za-z0-9]+
     )
-""", flags=re.VERBOSE)
+""",
+    flags=re.VERBOSE,
+)
 
 specific_custom_formats = [
     "%m/%d/%Y %I:%M %p",
@@ -32,6 +33,8 @@ specific_custom_formats = [
     "%c",
 ]
 
+# fmt: off
+# The example dates are aligned into a column, which the formatter would undo.
 generic_formats = {
     1: [
         ["%Y%m%dT%H%M%SZ"],                                 # 20300124T054513Z
@@ -183,6 +186,7 @@ generic_formats = {
         ["%a", "%B", "%d", "%Y", "%I", "%M", "%S", "%p"],   # Thu January 24 2030 05 45 13 AM
     ],
 }
+# fmt: on
 
 
 def make_new_format(format_parts, date_string_parts):
@@ -225,7 +229,9 @@ def detect_format(text):
 
 
 def prompt_for_date():
-    print(f"{F_BOLD}Paste an example date/time string to see the guessed format.{NO_FORMAT}")
+    print(
+        f"{F_BOLD}Paste an example date/time string to see the guessed format.{NO_FORMAT}"
+    )
     return input(f"{F_BOLD}> {NO_FORMAT}")
 
 

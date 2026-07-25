@@ -6,8 +6,13 @@ __pycache__/
 # Distribution / packaging
 dist/
 
+# Environments
+.venv/
+
 # Unit test / coverage reports
 htmlcov/
 .coverage
 .coverage.*
 coverage.xml
+.pytest_cache/
+.ruff_cache/
