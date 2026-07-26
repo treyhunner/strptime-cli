@@ -25,12 +25,7 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
-dependencies = [
-    "textual",
-    "pyperclip",
-    "platformdirs",
-    "darkdetect",
-]
+dependencies = []
 
 [project.urls]
 Documentation = "https://github.com/treyhunner/strptime-cli#readme"
@@ -52,7 +47,7 @@ dev = [
 only-include = ["strptime.py"]
 
 [tool.hatch.build.targets.sdist]
-only-include = ["strptime.py", "tests.py", "README.md"]
+only-include = ["strptime.py", "tests.py", "README.md", "LICENSE.txt"]
 
 [tool.pytest.ini_options]
 python_files = ["tests.py", "test_*.py", "*_test.py"]
