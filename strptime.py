@@ -1,7 +1,11 @@
 """
 Usage:
-$ python -m strptime "2030-01-24 05:45"
+$ strptime "2030-01-24 05:45"
 %Y-%m-%d %H:%M
+
+Guess the strptime format string that matches a given date string.
+
+Run strptime with no arguments to be prompted for a date string.
 """
 
 import re
@@ -236,8 +240,9 @@ def prompt_for_date():
 
 
 def main():
-    if "--help" in sys.argv:
-        sys.exit(__doc__.strip())
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print(__doc__.strip())
+        return
     text = " ".join(sys.argv[1:])
     if not text:
         text = prompt_for_date()

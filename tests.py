@@ -21,11 +21,12 @@ def test_main_with_valid_format(mock_argv, capsys):
     assert captured.out.strip() == "%Y-%m-%d %H:%M"
 
 
-def test_main_with_help(mock_argv):
-    mock_argv(["--help"])
-    with pytest.raises(SystemExit) as excinfo:
-        main()
-    assert "Usage:" in str(excinfo.value)
+@pytest.mark.parametrize("flag", ["--help", "-h"])
+def test_main_with_help(mock_argv, capsys, flag):
+    mock_argv([flag])
+    main()
+    captured = capsys.readouterr()
+    assert "Usage:" in captured.out
 
 
 def test_main_with_no_args(mock_argv, capsys, monkeypatch):
